@@ -121,6 +121,69 @@ d = ImageDraw.Draw(font)  # frame 10: life icon, a small amber arrow pointing up
 d.polygon([(84, 0), (87, 7), (84, 5), (81, 7)], fill=AMBER)
 save(font, "digits.png")
 
+# Menu font: background tiles, one 8x8 cell per glyph, one row per ink colour.
+# The game maps characters through the same GLYPHS string (src/ui.rs), so keep the two in step.
+GLYPHS = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:!?/><#'()_"
+LETTERS = {
+    "A": "01110 10001 10001 11111 10001 10001 10001", "B": "11110 10001 10001 11110 10001 10001 11110",
+    "C": "01110 10001 10000 10000 10000 10001 01110", "D": "11110 10001 10001 10001 10001 10001 11110",
+    "E": "11111 10000 10000 11110 10000 10000 11111", "F": "11111 10000 10000 11110 10000 10000 10000",
+    "G": "01110 10001 10000 10111 10001 10001 01111", "H": "10001 10001 10001 11111 10001 10001 10001",
+    "I": "01110 00100 00100 00100 00100 00100 01110", "J": "00111 00010 00010 00010 00010 10010 01100",
+    "K": "10001 10010 10100 11000 10100 10010 10001", "L": "10000 10000 10000 10000 10000 10000 11111",
+    "M": "10001 11011 10101 10101 10001 10001 10001", "N": "10001 10001 11001 10101 10011 10001 10001",
+    "O": "01110 10001 10001 10001 10001 10001 01110", "P": "11110 10001 10001 11110 10000 10000 10000",
+    "Q": "01110 10001 10001 10001 10101 10010 01101", "R": "11110 10001 10001 11110 10100 10010 10001",
+    "S": "01111 10000 10000 01110 00001 00001 11110", "T": "11111 00100 00100 00100 00100 00100 00100",
+    "U": "10001 10001 10001 10001 10001 10001 01110", "V": "10001 10001 10001 10001 10001 01010 00100",
+    "W": "10001 10001 10001 10101 10101 10101 01010", "X": "10001 10001 01010 00100 01010 10001 10001",
+    "Y": "10001 10001 01010 00100 00100 00100 00100", "Z": "11111 00001 00010 00100 01000 10000 11111",
+    ".": "00000 00000 00000 00000 00000 01100 01100", "-": "00000 00000 00000 11111 00000 00000 00000",
+    ":": "00000 01100 01100 00000 01100 01100 00000", "!": "00100 00100 00100 00100 00100 00000 00100",
+    "?": "01110 10001 00001 00010 00100 00000 00100", "/": "00001 00010 00010 00100 01000 01000 10000",
+    ">": "01000 00100 00010 00001 00010 00100 01000", "<": "00010 00100 01000 10000 01000 00100 00010",
+    "#": "01010 01010 11111 01010 11111 01010 01010", "'": "00100 00100 01000 00000 00000 00000 00000",
+    "(": "00010 00100 01000 01000 01000 00100 00010", ")": "01000 00100 00010 00010 00010 00100 01000",
+    "_": "00000 00000 00000 00000 00000 00000 11111",
+}
+for i, glyph in enumerate(DIGITS):
+    LETTERS[str(i)] = glyph
+INKS = [  # (glyph, shadow): white, amber, dim, rose, as in the web version
+    ((236, 232, 255), (24, 20, 52)), ((255, 200, 97), (70, 40, 10)),
+    ((141, 134, 184), (20, 18, 40)), ((255, 93, 143), (60, 14, 34)),
+]
+menu = Image.new("RGBA", (8 * len(GLYPHS), 8 * len(INKS)), (0, 0, 0, 0))
+for row, (ink, shade) in enumerate(INKS):
+    for i, ch in enumerate(GLYPHS):
+        if ch == " ":
+            continue
+        rows = LETTERS[ch].split()
+        for colour, (ox, oy) in ((shade, (2, 1)), (ink, (1, 0))):
+            for y, bits in enumerate(rows):
+                for x, bit in enumerate(bits):
+                    if bit == "1":
+                        menu.putpixel((i * 8 + x + ox, row * 8 + y + oy), colour)
+save(menu, "font.png")
+
+# Title logo: the same letters at 3x, amber shading to orange, with a dark drop shadow.
+WORD, SCALE = "STAR PICKET", 3
+logo = Image.new("RGBA", (200, 24), (0, 0, 0, 0))
+TOP, BOTTOM, SHADOW = (255, 226, 150), (255, 150, 60), (70, 30, 20)
+x0 = (200 - (len(WORD) * 6 - 1) * SCALE) // 2
+for pass_, (ox, oy) in enumerate(((2, 2), (0, 0))):
+    for i, ch in enumerate(WORD):
+        if ch == " ":
+            continue
+        for y, bits in enumerate(LETTERS[ch].split()):
+            band = y * 3 // 7  # three shading bands down each letter: 0, 1, 2
+            colour = SHADOW if pass_ == 0 else tuple(round(TOP[k] + (BOTTOM[k] - TOP[k]) * band / 2) for k in range(3))
+            for x, bit in enumerate(bits):
+                if bit == "1":
+                    for dy in range(SCALE):
+                        for dx in range(SCALE):
+                            logo.putpixel((x0 + (i * 6 + x) * SCALE + dx + ox, 1 + y * SCALE + dy + oy), colour)
+save(logo, "logo.png")
+
 # Parallax star layers, 256x256 each so the hardware wraps them seamlessly.
 stars = load("Star_Tiles.png")
 px = stars.load()

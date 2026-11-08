@@ -12,10 +12,17 @@ with a flash cart.
 |---|---|
 | D-pad | Steer: the ship turns toward the direction you hold and speeds up |
 | (automatic) | Guns fire fore and aft on their own |
-| Start | Pause; after Game Over, start again |
+| Start | Pause (resume, or quit to the title) |
+| Menus | D-pad to choose, A or Start to confirm, B to go back |
 
 ## What's in this prototype
 
+- Title screen with LAUNCH and TOP PILOTS, over the drifting starfield.
+- A local leaderboard of the top ten patrols (callsign, round reached, score), saved in the cartridge's
+  battery-backed SRAM so it survives power-off. Make the top ten and you enter a three-letter callsign arcade-style:
+  Up/Down changes the letter, A moves on, B goes back. Your last callsign is offered next time.
+- Pause menu, Game Over screen, and ROUND / SECTOR CLEAR banners. Text is drawn on a background layer, so it
+  costs none of the GBA's 128 sprites; the playfield is darkened in hardware behind the pause and Game Over text.
 - A wrapping sector about 8.5 screens across, with two parallax star layers.
 - The player ship and bullets rotated by the GBA's hardware: 32 facings, one shared rotation matrix each.
 - Hex stations: shoot out all six cannon pods (200 each) or hit the core three times (1500 for the station).
@@ -26,8 +33,8 @@ with a flash cart.
   bass get busier while a station has you in range.
 
 Not ported yet: squadrons, the spy ship, Condition Yellow/Red, the five station designs, mines, voice callouts,
-title screen, and a saved high-score table. The online leaderboard and share card can't come over: the GBA has
-no network.
+and the art style toggle. The online leaderboard and share card can't come over: the GBA has no network, so the
+leaderboard is local.
 
 ## Building
 
@@ -42,6 +49,7 @@ agb-gbafix target/thumbv4t-none-eabi/release/star-picket-retro -o dist/star-pick
 
 `cargo run --release` builds and opens the game in `mgba-qt` if it's on your PATH.
 `cargo build --release --features showcase` parks a station right in front of the start position, for testing.
+`cargo build --release --features quickover` gives you one ship that explodes 3 seconds in, for testing the menus.
 `cargo build --release --features soundcheck` plays every pitched instrument at every note the game can use and
 logs the result to mGBA's log: run it after changing the sounds or the pitch maths.
 

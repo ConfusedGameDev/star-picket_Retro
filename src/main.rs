@@ -9,7 +9,7 @@ extern crate alloc;
 
 use agb::{
     display::{
-        AffineMatrix, Palette16, Priority, Rgb15,
+        AffineMatrix, GraphicsFrame, Palette16, Priority, Rgb15,
         object::{
             AffineMatrixObject, AffineMode, DynamicSprite16, Object, ObjectAffine, PaletteVramSingle, Size, SpriteVram,
             include_aseprite,
@@ -20,10 +20,13 @@ use agb::{
     include_background_gfx,
     input::{Button, ButtonController},
 };
-use alloc::vec::Vec;
+use alloc::{format, vec::Vec};
 
+mod scores;
 mod sound;
+mod ui;
 use sound::Ev;
+use ui::Ink;
 
 include_aseprite!(
     mod sprites,
@@ -43,6 +46,8 @@ include_background_gfx!(
     "001020",
     FAR => deduplicate "gfx/stars_far.png",
     NEAR => deduplicate "gfx/stars_near.png",
+    FONT => "gfx/font.png",
+    LOGO => "gfx/logo.png",
 );
 
 type N = Num<i32, 8>;
@@ -113,9 +118,15 @@ struct Game {
     round: i32,
     fire_t: i32,
     clear_t: i32,
-    over_t: i32,
+    /// the last life is gone; the menus take over
+    over: bool,
+    banner: Option<(Banner, i32)>,
     frame: u32,
 }
+
+/// short messages shown mid-screen during play
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Banner { Round(i32), Clear }
 
 impl Game {
     fn new() -> Self {
@@ -124,7 +135,7 @@ impl Game {
             p: Player { pos: mid, a: num!(0.75), v: num!(1.75), inv: 120, alive: true, dead_t: 0 },
             cam: mid,
             bullets: Vec::new(), stations: Vec::new(), miss: Vec::new(), rocks: Vec::new(), booms: Vec::new(), events: Vec::new(),
-            score: 0, lives: 3, round: 0, fire_t: 0, clear_t: 0, over_t: 0, frame: 0,
+            score: 0, lives: if cfg!(feature = "quickover") { 1 } else { 3 }, round: 0, fire_t: 0, clear_t: 0, over: false, banner: None, frame: 0,
         };
         g.next_round();
         g
@@ -132,6 +143,7 @@ impl Game {
 
     fn next_round(&mut self) {
         self.round += 1;
+        self.banner = Some((Banner::Round(self.round), 120));
         self.stations.clear(); self.miss.clear(); self.rocks.clear();
         let n = (3 + self.round).min(10) as usize;
         let mut tries = 0;
@@ -177,16 +189,18 @@ impl Game {
         self.booms.push(Boom { pos, t: 0 });
         self.score += 1500;
         self.events.push(Ev::Station);
-        if self.stations.iter().all(|s| !s.alive) && self.clear_t == 0 { self.clear_t = 180; }
+        if self.stations.iter().all(|s| !s.alive) && self.clear_t == 0 {
+            self.clear_t = 180;
+            self.banner = Some((Banner::Clear, 170));
+        }
     }
 
     fn update(&mut self, input: &ButtonController) {
         self.frame = self.frame.wrapping_add(1);
-        if self.over_t > 0 {
-            self.over_t -= 1;
-            if self.over_t == 0 || (self.over_t < 180 && input.is_just_pressed(Button::Start)) { *self = Game::new(); }
-            return;
-        }
+        if self.over { return; }
+        // `--features quickover`: the only ship explodes 3 seconds in, for testing the menus
+        if cfg!(feature = "quickover") && self.frame == 180 { self.p.inv = 0; self.kill_player(); }
+        if let Some((_, t)) = &mut self.banner { *t -= 1; if *t <= 0 { self.banner = None; } }
 
         // --- player: the D-pad picks a heading, the ship turns toward it and speeds up ---
         let (ix, iy) = (input.x_tri() as i32, input.y_tri() as i32);
@@ -216,7 +230,7 @@ impl Game {
                     let pp = self.p.pos;
                     self.miss.retain(|m| !near(m.pos, pp, 280));
                     self.rocks.retain(|r| !near(r.pos, pp, 40));
-                } else { self.over_t = 240; }
+                } else { self.over = true; }
             }
         }
 
@@ -369,17 +383,175 @@ fn draw_radar(g: &Game, palette: &PaletteVramSingle) -> SpriteVram {
     s.to_vram(palette.clone())
 }
 
+/// Everything in the sector plus the HUD. World sprites sit below the text layer, the HUD above it.
+fn draw_world(g: &Game, frame: &mut GraphicsFrame, matrices: &[AffineMatrixObject], radar: &SpriteVram) {
+    let mut budget = 124usize; // OAM holds 128 objects
+    // objects shown first draw on top, so: HUD, effects, ships, stations, rocks
+    macro_rules! show {
+        ($obj:expr) => { if budget > 0 { budget -= 1; $obj.show(frame); } };
+    }
+    macro_rules! world {
+        ($obj:expr) => { $obj.set_priority(Priority::P1); show!($obj); };
+    }
+
+    let mut sc = g.score;
+    for i in (0..7).rev() {
+        let mut o = Object::new(sprites::DIGITS.sprite((sc % 10) as usize));
+        o.set_pos((4 + i * 7, 4));
+        show!(o);
+        sc /= 10;
+    }
+    for i in 0..g.lives.clamp(0, 5) {
+        let mut o = Object::new(sprites::DIGITS.sprite(10));
+        o.set_pos((4 + i * 9, 14));
+        show!(o);
+    }
+    let mut r = Object::new(radar.clone());
+    r.set_pos((SW - 36, 4));
+    show!(r);
+
+    for b in g.booms.iter().filter(|b| b.t >= 0) {
+        let s = g.to_screen(b.pos);
+        if !on_screen(s, 20) { continue; }
+        let mut o = Object::new(sprites::EXPLOSION.sprite((b.t / 4).min(7) as usize));
+        o.set_pos((s.0 - 16, s.1 - 16));
+        world!(o);
+    }
+    if g.p.alive && (g.p.inv == 0 || (g.frame / 4) % 2 == 0) {
+        let s = g.to_screen(g.p.pos);
+        let mut o = ObjectAffine::new(sprites::SHIPS.sprite(0), matrices[facing(g.p.a)].clone(), AffineMode::AffineDouble);
+        o.set_pos((s.0 - 32, s.1 - 32));
+        world!(o);
+    }
+    for b in &g.bullets {
+        let s = g.to_screen(b.pos);
+        if !on_screen(s, 8) { continue; }
+        let mut o = ObjectAffine::new(sprites::BOLT.sprite(0), matrices[b.f].clone(), AffineMode::Affine);
+        o.set_pos((s.0 - 8, s.1 - 8));
+        world!(o);
+    }
+    for m in &g.miss {
+        let s = g.to_screen(m.pos);
+        if !on_screen(s, 8) { continue; }
+        let mut o = ObjectAffine::new(sprites::MISSILE.sprite(0), matrices[facing(m.a)].clone(), AffineMode::Affine);
+        o.set_pos((s.0 - 8, s.1 - 8));
+        world!(o);
+    }
+    for st in g.stations.iter().filter(|s| s.alive) {
+        let s = g.to_screen(st.pos);
+        if !on_screen(s, 40) { continue; }
+        for k in 0..6 {
+            if st.pods[k] == 0 || st.pod_flash[k] % 2 == 1 { continue; }
+            let off = pod_off(k);
+            let mut o = Object::new(sprites::POD.sprite(0));
+            o.set_pos((s.0 + off.x.round() - 8, s.1 + off.y.round() - 8));
+            world!(o);
+        }
+        let mut o = Object::new(sprites::CORE.sprite(if st.core_flash > 0 { 1 } else { 0 }));
+        o.set_pos((s.0 - 8, s.1 - 8));
+        world!(o);
+        let mut o = Object::new(sprites::HULL.sprite(0));
+        o.set_pos((s.0 - 32, s.1 - 32));
+        world!(o);
+    }
+    for rk in &g.rocks {
+        let s = g.to_screen(rk.pos);
+        let (spr, h) = if rk.big { (sprites::ROCK_BIG.sprite(0), 32) } else { (sprites::ROCK_SMALL.sprite(0), 16) };
+        if !on_screen(s, h) { continue; }
+        let mut o = Object::new(spr);
+        o.set_pos((s.0 - h, s.1 - h));
+        world!(o);
+    }
+}
+
+// ---------- screens ----------
+#[derive(Clone, Copy)]
+enum Screen {
+    Title { sel: usize },
+    Board { highlight: Option<usize> },
+    Play,
+    Paused { sel: usize },
+    GameOver { t: i32 },
+    /// arcade-style callsign entry for a new top-ten score
+    Entry { name: [u8; 3], pos: usize },
+}
+
+/// letters a callsign can use, cycled with Up/Down
+const CALLSIGN: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-";
+
+fn cycle(c: u8, step: i32) -> u8 {
+    let i = CALLSIGN.iter().position(|&x| x == c).unwrap_or(0) as i32;
+    CALLSIGN[(i + step).rem_euclid(CALLSIGN.len() as i32) as usize]
+}
+fn name_str(n: &[u8; 3]) -> &str { core::str::from_utf8(n).unwrap_or("???") }
+
+/// a two-item menu with a blinking cursor
+fn menu(text: &mut ui::Text, x: i32, rows: [i32; 2], items: [&str; 2], sel: usize, t: u32) {
+    for k in 0..2 {
+        let on = k == sel;
+        text.put(x - 2, rows[k], if on && (t / 16) % 2 == 0 { ">" } else { " " }, Ink::Amber);
+        text.put(x, rows[k], items[k], if on { Ink::Amber } else { Ink::White });
+    }
+}
+
+/// the parts of each screen that don't change while it's showing
+fn draw_static(text: &mut ui::Text, screen: Screen, g: &Game, board: &scores::Board) {
+    text.clear();
+    match screen {
+        Screen::Title { .. } => {
+            text.logo(3);
+            text.centre(7, "SECTOR PATROL", Ink::Dim);
+            text.centre(16, &format!("HI {:07}", board.best()), Ink::Dim);
+            text.centre(18, "PIXEL ART: MATT WALKDEN", Ink::Dim);
+        }
+        Screen::Board { highlight } => {
+            text.centre(1, "TOP PILOTS", Ink::Rose);
+            if board.entries.is_empty() {
+                text.centre(8, "NO PATROLS LOGGED YET", Ink::Dim);
+                text.centre(10, "BE THE FIRST", Ink::Dim);
+            } else {
+                text.put(3, 3, " #  PILOT RND    SCORE", Ink::Dim);
+                for (i, e) in board.entries.iter().enumerate() {
+                    let row = format!("{:>2}  {}   {:>3}  {:>7}", i + 1, name_str(&e.name), e.round, e.score);
+                    text.put(3, 5 + i as i32, &row, if highlight == Some(i) { Ink::Amber } else { Ink::White });
+                }
+            }
+            text.centre(17, "PRESS A", Ink::Dim);
+        }
+        Screen::Paused { .. } => {
+            text.centre(6, "PAUSED", Ink::Amber);
+            text.centre(15, "START: RESUME", Ink::Dim);
+        }
+        Screen::GameOver { .. } => {
+            text.centre(7, "GAME OVER", Ink::Rose);
+            text.centre(9, &format!("SCORE {:07}", g.score), Ink::White);
+            text.centre(11, &format!("REACHED ROUND {}", g.round), Ink::Dim);
+        }
+        Screen::Entry { .. } => {
+            text.centre(3, "NEW RECORD!", Ink::Amber);
+            text.centre(5, &format!("SCORE {:07}", g.score), Ink::White);
+            text.centre(8, "ENTER YOUR CALLSIGN", Ink::Dim);
+            text.centre(15, "UP/DOWN: LETTER  A: NEXT", Ink::Dim);
+            text.centre(17, "B: BACK", Ink::Dim);
+        }
+        Screen::Play => {}
+    }
+}
+
 #[agb::entry]
 fn main(mut gba: agb::Gba) -> ! {
     let mut gfx = gba.graphics.get();
     let mut input = ButtonController::new();
     let mut audio = sound::Audio::new(&mut gba.mixer);
+    let mut store = scores::Store::open(&mut gba.save);
+    let mut board = store.load();
 
     gfx.set_background_palettes(backdrop::PALETTES);
     let mut far = RegularBackground::new(Priority::P3, RegularBackgroundSize::Background32x32, TileFormat::FourBpp);
     far.fill_with(&backdrop::FAR);
     let mut near_bg = RegularBackground::new(Priority::P2, RegularBackgroundSize::Background32x32, TileFormat::FourBpp);
     near_bg.fill_with(&backdrop::NEAR);
+    let mut text = ui::Text::new(&backdrop::FONT, &backdrop::LOGO);
 
     // one rotation matrix per facing, shared by every rotated sprite (the hardware allows 32)
     let matrices: Vec<AffineMatrixObject> = (0..FACINGS)
@@ -389,101 +561,126 @@ fn main(mut gba: agb::Gba) -> ! {
     let radar_palette = PaletteVramSingle::try_allocate_new(&RADAR_PALETTE).expect("palette space for the radar");
     let mut g = Game::new();
     let mut radar = draw_radar(&g, &radar_palette);
-    let mut paused = false;
+    let mut screen = Screen::Title { sel: 0 };
+    let mut redraw = true;
+    let mut shown_banner: Option<Banner> = None;
+    let mut demo = vec2(N::new(0), N::new(0)); // starfield drift behind the menus
+    let mut t: u32 = 0;
 
     loop {
         input.update();
-        if input.is_just_pressed(Button::Start) && g.over_t == 0 { paused = !paused; }
-        if !paused { g.update(&input); }
-        for ev in g.events.drain(..) { audio.play(ev); }
-        // the band drops out while you respawn and gets busier while a station has you in range
-        audio.alive = g.p.alive && !paused;
-        audio.tense = g.p.alive && g.stations.iter().any(|s| s.alive && near(s.pos, g.p.pos, 310));
-        if g.frame % 4 == 0 { radar = draw_radar(&g, &radar_palette); }
+        t = t.wrapping_add(1);
+        let pressed = |b: Button| input.is_just_pressed(b);
+        let ok = pressed(Button::A) || pressed(Button::Start);
+        let ud = input.just_pressed_y_tri() as i32;
+        let lr = input.just_pressed_x_tri() as i32;
+        let mut next = None;
 
-        let mut frame = gfx.frame();
-        let mut budget = 124usize; // OAM holds 128 objects
-        // objects shown first draw on top, so: HUD, effects, ships, stations, rocks
-        macro_rules! show {
-            ($obj:expr) => { if budget > 0 { budget -= 1; $obj.show(&mut frame); } };
-        }
-
-        let mut sc = g.score;
-        for i in (0..7).rev() {
-            let mut o = Object::new(sprites::DIGITS.sprite((sc % 10) as usize));
-            o.set_pos((4 + i * 7, 4));
-            show!(o);
-            sc /= 10;
-        }
-        for i in 0..g.lives.clamp(0, 5) {
-            let mut o = Object::new(sprites::DIGITS.sprite(10));
-            o.set_pos((4 + i * 9, 14));
-            show!(o);
-        }
-        let mut r = Object::new(radar.clone());
-        r.set_pos((SW - 36, 4));
-        show!(r);
-
-        for b in g.booms.iter().filter(|b| b.t >= 0) {
-            let s = g.to_screen(b.pos);
-            if !on_screen(s, 20) { continue; }
-            let mut o = Object::new(sprites::EXPLOSION.sprite((b.t / 4).min(7) as usize));
-            o.set_pos((s.0 - 16, s.1 - 16));
-            show!(o);
-        }
-        if g.p.alive && (g.p.inv == 0 || (g.frame / 4) % 2 == 0) {
-            let s = g.to_screen(g.p.pos);
-            let mut o = ObjectAffine::new(sprites::SHIPS.sprite(0), matrices[facing(g.p.a)].clone(), AffineMode::AffineDouble);
-            o.set_pos((s.0 - 32, s.1 - 32));
-            show!(o);
-        }
-        for b in &g.bullets {
-            let s = g.to_screen(b.pos);
-            if !on_screen(s, 8) { continue; }
-            let mut o = ObjectAffine::new(sprites::BOLT.sprite(0), matrices[b.f].clone(), AffineMode::Affine);
-            o.set_pos((s.0 - 8, s.1 - 8));
-            show!(o);
-        }
-        for m in &g.miss {
-            let s = g.to_screen(m.pos);
-            if !on_screen(s, 8) { continue; }
-            let mut o = ObjectAffine::new(sprites::MISSILE.sprite(0), matrices[facing(m.a)].clone(), AffineMode::Affine);
-            o.set_pos((s.0 - 8, s.1 - 8));
-            show!(o);
-        }
-        for st in g.stations.iter().filter(|s| s.alive) {
-            let s = g.to_screen(st.pos);
-            if !on_screen(s, 40) { continue; }
-            for k in 0..6 {
-                if st.pods[k] == 0 || st.pod_flash[k] % 2 == 1 { continue; }
-                let off = pod_off(k);
-                let mut o = Object::new(sprites::POD.sprite(0));
-                o.set_pos((s.0 + off.x.round() - 8, s.1 + off.y.round() - 8));
-                show!(o);
+        match &mut screen {
+            Screen::Title { sel } => {
+                if ud != 0 { *sel ^= 1; audio.play(Ev::Move); }
+                if ok {
+                    audio.play(Ev::Select);
+                    if *sel == 0 { g = Game::new(); next = Some(Screen::Play); } else { next = Some(Screen::Board { highlight: None }); }
+                }
             }
-            let mut o = Object::new(sprites::CORE.sprite(if st.core_flash > 0 { 1 } else { 0 }));
-            o.set_pos((s.0 - 8, s.1 - 8));
-            show!(o);
-            let mut o = Object::new(sprites::HULL.sprite(0));
-            o.set_pos((s.0 - 32, s.1 - 32));
-            show!(o);
+            Screen::Board { .. } => {
+                if ok || pressed(Button::B) { audio.play(Ev::Select); next = Some(Screen::Title { sel: 0 }); }
+            }
+            Screen::Play => {
+                if pressed(Button::Start) { audio.play(Ev::Move); next = Some(Screen::Paused { sel: 0 }); }
+                else {
+                    g.update(&input);
+                    if g.over { next = Some(Screen::GameOver { t: 0 }); }
+                }
+            }
+            Screen::Paused { sel } => {
+                if ud != 0 { *sel ^= 1; audio.play(Ev::Move); }
+                if pressed(Button::Start) || pressed(Button::B) || (pressed(Button::A) && *sel == 0) { audio.play(Ev::Select); next = Some(Screen::Play); }
+                else if pressed(Button::A) { audio.play(Ev::Select); next = Some(Screen::Title { sel: 0 }); }
+            }
+            Screen::GameOver { t: gt } => {
+                *gt += 1;
+                if *gt > 180 || (*gt > 45 && ok) {
+                    next = Some(if board.qualifies(g.score) {
+                        Screen::Entry { name: board.last_name.unwrap_or(*b"AAA"), pos: 0 }
+                    } else {
+                        Screen::Board { highlight: None }
+                    });
+                }
+            }
+            Screen::Entry { name, pos } => {
+                if ud != 0 { name[*pos] = cycle(name[*pos], -ud); audio.play(Ev::Move); } // up goes A -> B
+                if lr > 0 && *pos < 2 { *pos += 1; audio.play(Ev::Move); }
+                if (lr < 0 || pressed(Button::B)) && *pos > 0 { *pos -= 1; audio.play(Ev::Move); }
+                if ok {
+                    audio.play(Ev::Select);
+                    if *pos < 2 { *pos += 1; } else {
+                        let place = board.insert(scores::Entry { name: *name, score: g.score, round: g.round.clamp(0, 255) as u8 });
+                        store.save(&board);
+                        next = Some(Screen::Board { highlight: Some(place) });
+                    }
+                }
+            }
         }
-        for rk in &g.rocks {
-            let s = g.to_screen(rk.pos);
-            let (spr, h) = if rk.big { (sprites::ROCK_BIG.sprite(0), 32) } else { (sprites::ROCK_SMALL.sprite(0), 16) };
-            if !on_screen(s, h) { continue; }
-            let mut o = Object::new(spr);
-            o.set_pos((s.0 - h, s.1 - h));
-            show!(o);
+        if let Some(s) = next { screen = s; redraw = true; }
+        for ev in g.events.drain(..) { audio.play(ev); }
+
+        // the menus get the calm loop; in play the band drops out while you respawn and gets busier
+        // while a station has you in range
+        let playing = matches!(screen, Screen::Play);
+        let in_menus = matches!(screen, Screen::Title { .. } | Screen::Board { .. } | Screen::Entry { .. });
+        audio.alive = in_menus || (playing && g.p.alive);
+        audio.tense = playing && g.p.alive && g.stations.iter().any(|s| s.alive && near(s.pos, g.p.pos, 310));
+
+        // ---- text ----
+        if redraw { draw_static(&mut text, screen, &g, &board); redraw = false; shown_banner = None; }
+        match screen {
+            Screen::Title { sel } => menu(&mut text, 11, [11, 13], ["LAUNCH", "TOP PILOTS"], sel, t),
+            Screen::Paused { sel } => menu(&mut text, 10, [9, 11], ["RESUME", "QUIT TO TITLE"], sel, t),
+            Screen::Entry { name, pos } => {
+                for k in 0..3 {
+                    let blink = k == pos && (t / 12) % 2 == 1;
+                    let ch = [name[k]];
+                    text.put(13 + 2 * k as i32, 11, if blink { " " } else { name_str_1(&ch) }, if k == pos { Ink::Amber } else { Ink::White });
+                    text.put(13 + 2 * k as i32, 12, if k == pos { "_" } else { " " }, Ink::Amber);
+                }
+            }
+            Screen::Play => {
+                let now = g.banner.map(|b| b.0);
+                if now != shown_banner {
+                    text.clear_row(6);
+                    match now {
+                        Some(Banner::Round(n)) => text.centre(6, &format!("ROUND {}", n), Ink::Amber),
+                        Some(Banner::Clear) => text.centre(6, "SECTOR CLEAR", Ink::Amber),
+                        None => {}
+                    }
+                    shown_banner = now;
+                }
+            }
+            _ => {}
         }
 
+        // ---- picture ----
+        let with_world = matches!(screen, Screen::Play | Screen::Paused { .. } | Screen::GameOver { .. });
+        if with_world && g.frame % 4 == 0 { radar = draw_radar(&g, &radar_palette); }
+        let mut frame = gfx.frame();
+        let cam = if with_world { g.cam } else { demo += vec2(num!(0.6), num!(0.25)); demo };
+        if with_world { draw_world(&g, &mut frame, &matrices, &radar); }
+        text.show(&mut frame);
         // parallax: both star layers move slower than the world, the far one slowest
-        far.set_scroll_pos((g.cam.x.floor() / 6, g.cam.y.floor() / 6));
-        near_bg.set_scroll_pos((g.cam.x.floor() / 2, g.cam.y.floor() / 2));
-        far.show(&mut frame);
-        near_bg.show(&mut frame);
+        far.set_scroll_pos((cam.x.floor() / 6, cam.y.floor() / 6));
+        near_bg.set_scroll_pos((cam.x.floor() / 2, cam.y.floor() / 2));
+        let far_id = far.show(&mut frame);
+        let near_id = near_bg.show(&mut frame);
+        // behind the pause menu and Game Over, darken everything except the text so it reads clearly
+        if matches!(screen, Screen::Paused { .. } | Screen::GameOver { .. }) {
+            frame.blend().darken(num!(0.5)).enable_background(far_id).enable_background(near_id).enable_object().enable_backdrop();
+        }
 
         audio.frame();
         frame.commit();
     }
 }
+
+fn name_str_1(c: &[u8; 1]) -> &str { core::str::from_utf8(c).unwrap_or(" ") }

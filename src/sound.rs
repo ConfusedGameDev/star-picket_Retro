@@ -27,7 +27,7 @@ static BIG: SoundData = include_wav!("sfx/big.wav");
 static DIE: SoundData = include_wav!("sfx/die.wav");
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Ev { Die, Station, Pod, Hit, Missile, Rock, Launch }
+pub enum Ev { Die, Station, Pod, Hit, Missile, Rock, Launch, /** menu cursor */ Move, /** menu choice */ Select }
 
 /// MIDI notes of each chord: Am, F, C, G
 const PROG: [[i32; 3]; 4] = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]];
@@ -141,6 +141,9 @@ impl<'gba> Audio<'gba> {
             Ev::Hit => self.now(BLIP, A4, ch[pick3()] + 24, 50, false),
             Ev::Launch => self.now(BLIP, A4, ch[0], 40, false),
             Ev::Die => self.now_with(DIE, UNPITCHED, 0, 230, true, true),
+            Ev::Move => self.now(BLIP, A4, ch[1] + 12, 70, false),
+            // a short chord-tone figure, off the grid so the menu answers at once
+            Ev::Select => { self.now(PLUCK, A4, ch[0] + 12, 120, true); self.at(self.step + 1, PLUCK, A4, ch[2] + 12, 100); }
             _ => {
                 // an instant crunch so the hit feels immediate, then the note on the grid
                 let (crunch, cv) = match ev { Ev::Station => (BIG, 230), Ev::Pod => (BOOM, 110), _ => (BOOM, 70) };

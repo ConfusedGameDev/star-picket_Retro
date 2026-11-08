@@ -8,9 +8,12 @@ edition = "2024"
 showcase = []
 # play every pitched instrument at every note, to check the mixer copes
 soundcheck = []
+# one ship that explodes 3 seconds in, to reach Game Over quickly when testing the menus
+quickover = []
 
 [dependencies]
 agb = "0.25.0"
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 
 [profile.dev]
 opt-level = 3

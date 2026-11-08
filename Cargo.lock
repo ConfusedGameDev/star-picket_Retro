@@ -587,6 +587,7 @@ name = "star-picket-retro"
 version = "0.1.0"
 dependencies = [
  "agb",
+ "serde",
 ]
 
 [[package]]
