@@ -6,6 +6,8 @@ edition = "2024"
 [features]
 # park a station next to the start position (screenshots, testing)
 showcase = []
+# play every pitched instrument at every note, to check the mixer copes
+soundcheck = []
 
 [dependencies]
 agb = "0.25.0"

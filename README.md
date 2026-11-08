@@ -42,6 +42,8 @@ agb-gbafix target/thumbv4t-none-eabi/release/star-picket-retro -o dist/star-pick
 
 `cargo run --release` builds and opens the game in `mgba-qt` if it's on your PATH.
 `cargo build --release --features showcase` parks a station right in front of the start position, for testing.
+`cargo build --release --features soundcheck` plays every pitched instrument at every note the game can use and
+logs the result to mGBA's log: run it after changing the sounds or the pitch maths.
 
 ## Art and sound
 

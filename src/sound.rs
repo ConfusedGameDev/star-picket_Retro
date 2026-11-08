@@ -12,6 +12,7 @@ use agb::{
     include_wav,
     sound::mixer::{Frequency, Mixer, MixerController, SoundChannel, SoundData},
 };
+use agb::sound::mixer::ChannelId;
 use alloc::vec::Vec;
 
 static PLUCK: SoundData = include_wav!("sfx/pluck.wav");
@@ -41,7 +42,10 @@ const UNPITCHED: i32 = -1;
 fn rate(m: i32, base: i32) -> Num<u32, 8> {
     let s = m - base;
     let (oct, r) = (s.div_euclid(12), SEMI[s.rem_euclid(12) as usize]);
-    Num::from_raw(if oct >= 0 { r << oct } else { r >> (-oct) })
+    let raw = if oct >= 0 { r << oct } else { r >> (-oct) };
+    // agb 0.25's mixer panics at exactly 1.5x speed (its copy buffer check is one byte short there),
+    // which is a perfect fifth above the sample's pitch. 1.496x is 5 cents flat: inaudible, and safe.
+    Num::from_raw(if raw == 384 { 383 } else { raw })
 }
 fn vol(x: i16) -> Num<i16, 8> { Num::from_raw(x) } // 256 = full volume
 fn chord(step: u32) -> [i32; 3] { PROG[(step / 32) as usize % PROG.len()] }
@@ -67,6 +71,10 @@ pub struct Audio<'gba> {
     dir: i32,
     last_kill: u32,
     frame: u32,
+    /// high-priority sounds still playing. agb panics if a high-priority sound arrives while all
+    /// 8 channels hold high-priority sounds, so we never let more than 7 be high priority.
+    high: Vec<ChannelId>,
+    sweep: Option<ChannelId>, // soundcheck only
     /// set by the game each frame
     pub alive: bool,
     pub tense: bool,
@@ -76,17 +84,23 @@ impl<'gba> Audio<'gba> {
     pub fn new(controller: &'gba mut MixerController) -> Self {
         Audio {
             mixer: controller.mixer(Frequency::Hz18157),
-            clock: num!(0), step: 0, slot: 0, queue: Vec::new(), pos: 0, dir: 1, last_kill: 0, frame: 0,
+            clock: num!(0), step: 0, slot: 0, queue: Vec::new(), pos: 0, dir: 1, last_kill: 0, frame: 0, high: Vec::new(), sweep: None,
             alive: true, tense: false,
         }
     }
 
-    fn now(&mut self, data: SoundData, base: i32, m: i32, v: i16, high: bool) {
+    /// `high`: kill notes may push out the backing loop. `critical` (the death sound) gets one extra slot.
+    fn now_with(&mut self, data: SoundData, base: i32, m: i32, v: i16, high: bool, critical: bool) {
+        let mixer = &mut self.mixer;
+        self.high.retain(|id| mixer.channel(id).is_some());
+        let high = high && self.high.len() < if critical { 7 } else { 6 };
         let mut ch = if high { SoundChannel::new_high_priority(data) } else { SoundChannel::new(data) };
         if base != UNPITCHED { ch.playback(rate(m, base)); }
         ch.volume(vol(v));
-        let _ = self.mixer.play_sound(ch); // a full mixer just drops the sound
+        // a low-priority sound is just dropped when every channel is busy
+        if let Some(id) = self.mixer.play_sound(ch) && high { self.high.push(id); }
     }
+    fn now(&mut self, data: SoundData, base: i32, m: i32, v: i16, high: bool) { self.now_with(data, base, m, v, high, false); }
 
     fn at(&mut self, step: u32, data: SoundData, base: i32, m: i32, v: i16) {
         self.queue.push(Note { step, data, base, m, vol: v });
@@ -126,7 +140,7 @@ impl<'gba> Audio<'gba> {
             // ungridded, but still in key
             Ev::Hit => self.now(BLIP, A4, ch[pick3()] + 24, 50, false),
             Ev::Launch => self.now(BLIP, A4, ch[0], 40, false),
-            Ev::Die => self.now(DIE, UNPITCHED, 0, 230, true),
+            Ev::Die => self.now_with(DIE, UNPITCHED, 0, 230, true, true),
             _ => {
                 // an instant crunch so the hit feels immediate, then the note on the grid
                 let (crunch, cv) = match ev { Ev::Station => (BIG, 230), Ev::Pod => (BOOM, 110), _ => (BOOM, 70) };
@@ -171,6 +185,23 @@ impl<'gba> Audio<'gba> {
     /// call once per frame
     pub fn frame(&mut self) {
         self.frame = self.frame.wrapping_add(1);
+        // `--features soundcheck`: sweep every pitched instrument across MIDI notes 20..=120 at the speeds
+        // the game really uses. Each note is mixed for one frame and then stopped, so none get dropped,
+        // and the band is muted. Logs progress to mGBA's log.
+        if cfg!(feature = "soundcheck") {
+            const SWEEP: [(SoundData, i32); 4] = [(PLUCK, A4), (BLIP, A4), (BELL, A4), (BASS, A2)];
+            if let Some(id) = self.sweep.take() && let Some(ch) = self.mixer.channel(&id) { ch.stop(); }
+            let i = self.frame as usize;
+            if let Some(&(data, base)) = SWEEP.get(i / 101) {
+                let m = 20 + (i % 101) as i32;
+                let mut ch = SoundChannel::new_high_priority(data);
+                ch.playback(rate(m, base)).volume(vol(40));
+                self.sweep = self.mixer.play_sound(ch);
+                if m == 120 { agb::println!("soundcheck: instrument {} ok", i / 101); }
+            } else if i == SWEEP.len() * 101 { agb::println!("soundcheck: done"); }
+            self.mixer.frame();
+            return;
+        }
         self.clock += 1;
         while self.clock >= STEP_FRAMES {
             self.clock -= STEP_FRAMES;
