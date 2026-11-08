@@ -58,6 +58,9 @@ SHIPS = [  # (row, col): rows green/red/blue, cols small..large
     (0, 2),  # 2 P-type (crescent)
     (1, 1),  # 3 E-type (dart)
     (0, 0),  # 4 spy
+    (1, 3),  # 5 I-type squadron leader
+    (0, 3),  # 6 P-type leader
+    (1, 2),  # 7 E-type leader
 ]
 save(strip([cell(ships, c * 64 + 32, r * 64 + 32, 32) for r, c in SHIPS]), "ships.png")
 

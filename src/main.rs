@@ -104,6 +104,30 @@ struct Missile { pos: V, a: N, life: i32 }
 struct Rock { pos: V, vel: V, big: bool }
 struct Boom { pos: V, t: i32 }
 
+// ---------- enemy ships ----------
+/// Squadron types, after the web version's I / P / E ships
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind { I, P, E }
+struct KindStats { name: &'static str, sp: N, turn: N, pts: u32, lead: u32, bonus: u32, frame: usize, lead_frame: usize, radar: u8 }
+fn stats(k: Kind) -> KindStats {
+    match k {
+        // I weaves at you, P swings in from your flank like a boomerang, E is a dart that barely turns.
+        // Faster relative to you than on the web: the GBA screen shows far less of the sector, so
+        // enemies that trail behind would spend the whole time off-screen. I-types match your cruise.
+        Kind::I => KindStats { name: "I", sp: num!(1.7), turn: num!(0.004), pts: 50, lead: 100, bonus: 500, frame: 1, lead_frame: 5, radar: 6 },
+        Kind::P => KindStats { name: "P", sp: num!(2.0), turn: num!(0.0064), pts: 60, lead: 120, bonus: 1000, frame: 2, lead_frame: 6, radar: 5 },
+        Kind::E => KindStats { name: "E", sp: num!(3.4), turn: num!(0.0009), pts: 70, lead: 140, bonus: 1500, frame: 3, lead_frame: 7, radar: 7 },
+    }
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode { Hunt, Form, Flee }
+struct Fighter { pos: V, a: N, sp: N, kind: Kind, leader: bool, squad: u32, slot: usize, mode: Mode, wob: N, dead: bool }
+/// squad 0 means a lone fighter
+struct Squad { id: u32, t: i32, done: bool }
+/// wingmen hold a V behind the leader, in the leader's frame (x forward, y to the side)
+const SLOTS: [(i32, i32); 4] = [(-16, -14), (-16, 14), (-33, -29), (-33, 29)];
+fn rotate(v: (i32, i32), a: N) -> V { let d = dir(a); vec2(d.x * v.0 - d.y * v.1, d.y * v.0 + d.x * v.1) }
+
 struct Game {
     p: Player,
     cam: V,
@@ -112,6 +136,11 @@ struct Game {
     miss: Vec<Missile>,
     rocks: Vec<Rock>,
     booms: Vec<Boom>,
+    fighters: Vec<Fighter>,
+    squads: Vec<Squad>,
+    next_squad: u32,
+    spawn_t: i32,
+    squad_t: i32,
     events: Vec<Ev>,
     score: u32,
     lives: i32,
@@ -126,7 +155,7 @@ struct Game {
 
 /// short messages shown mid-screen during play
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Banner { Round(i32), Clear }
+enum Banner { Round(i32), Clear, BattleStations(Kind), Broken, Squadron(u32) }
 
 impl Game {
     fn new() -> Self {
@@ -135,6 +164,7 @@ impl Game {
             p: Player { pos: mid, a: num!(0.75), v: num!(1.75), inv: 120, alive: true, dead_t: 0 },
             cam: mid,
             bullets: Vec::new(), stations: Vec::new(), miss: Vec::new(), rocks: Vec::new(), booms: Vec::new(), events: Vec::new(),
+            fighters: Vec::new(), squads: Vec::new(), next_squad: 1, spawn_t: 0, squad_t: 0,
             score: 0, lives: if cfg!(feature = "quickover") { 1 } else { 3 }, round: 0, fire_t: 0, clear_t: 0, over: false, banner: None, frame: 0,
         };
         g.next_round();
@@ -144,7 +174,9 @@ impl Game {
     fn next_round(&mut self) {
         self.round += 1;
         self.banner = Some((Banner::Round(self.round), 120));
-        self.stations.clear(); self.miss.clear(); self.rocks.clear();
+        self.stations.clear(); self.miss.clear(); self.rocks.clear(); self.fighters.clear(); self.squads.clear();
+        self.spawn_t = 240; // 4 s before the first lone fighter
+        self.squad_t = rnd(540, 840); // 9 to 14 s before the first squadron
         let n = (3 + self.round).min(10) as usize;
         let mut tries = 0;
         while self.stations.len() < n && tries < 2000 {
@@ -158,6 +190,8 @@ impl Game {
             if let Some(s) = self.stations.first_mut() { s.pos = wrapv(self.p.pos + vec2(N::new(30), N::new(-260))); }
             let pp = self.p.pos;
             self.rocks.retain(|r| !near(r.pos, pp, 200));
+            self.squad_t = 60; // and send a squadron right away
+            self.spawn_t = 90;
         }
         tries = 0;
         while self.rocks.len() < 30 && tries < 3000 {
@@ -229,6 +263,7 @@ impl Game {
                     self.p.alive = true; self.p.inv = 150; self.p.v = num!(1.75);
                     let pp = self.p.pos;
                     self.miss.retain(|m| !near(m.pos, pp, 280));
+                    for i in 0..self.fighters.len() { if near(self.fighters[i].pos, pp, 250) { self.kill_fighter(i, false); } }
                     self.rocks.retain(|r| !near(r.pos, pp, 40));
                 } else { self.over = true; }
             }
@@ -277,6 +312,8 @@ impl Game {
         }
         if crash { self.kill_player(); }
 
+        self.update_fighters();
+
         // --- missiles home in ---
         let pp = self.p.pos;
         let alive = self.p.alive;
@@ -298,6 +335,8 @@ impl Game {
         }
         if hit_player { self.kill_player(); }
 
+        self.fighters.retain(|f| !f.dead);
+        self.squads.retain(|s| !s.done);
         for b in self.booms.iter_mut() { b.t += 1; }
         self.booms.retain(|b| b.t < 32);
 
@@ -330,6 +369,10 @@ impl Game {
                 return true;
             }
         }
+        if let Some(i) = self.fighters.iter().position(|f| !f.dead && near(f.pos, at, 8)) {
+            self.kill_fighter(i, true);
+            return true;
+        }
         if let Some(i) = self.miss.iter().position(|m| near(m.pos, at, 6)) {
             let m = self.miss.swap_remove(i);
             self.booms.push(Boom { pos: m.pos, t: 6 });
@@ -347,6 +390,152 @@ impl Game {
         false
     }
 
+    fn kill_fighter(&mut self, i: usize, award: bool) {
+        let f = &mut self.fighters[i];
+        if f.dead { return; }
+        f.dead = true;
+        let (pos, sid, leader, st) = (f.pos, f.squad, f.leader, stats(f.kind));
+        self.booms.push(Boom { pos, t: 0 });
+        if award {
+            self.score += if leader { st.lead } else { st.pts };
+            self.events.push(if leader { Ev::Leader } else { Ev::Fighter });
+        }
+        if sid == 0 { return; }
+        let pp = self.p.pos;
+        let mut left = 0;
+        for m in self.fighters.iter_mut().filter(|m| m.squad == sid && !m.dead) {
+            left += 1;
+            if leader {
+                // the formation breaks: wingmen peel off and run
+                m.mode = Mode::Flee;
+                m.a = (ang_to(pp, m.pos) + rndn(num!(-0.1), num!(0.1))).rem_euclid(N::new(1));
+                m.sp = m.sp * num!(1.35);
+            }
+        }
+        if leader && left > 0 { self.banner = Some((Banner::Broken, 90)); }
+        if left == 0 {
+            if let Some(s) = self.squads.iter_mut().find(|s| s.id == sid) { s.done = true; }
+            if award {
+                // the whole squadron, every ship shot down
+                self.score += st.bonus;
+                self.events.push(Ev::Squad);
+                self.banner = Some((Banner::Squadron(st.bonus), 120));
+            }
+        }
+    }
+
+    /// a five-ship V launched from the nearest base that isn't right on top of you
+    fn launch_squad(&mut self) {
+        let pp = self.p.pos;
+        let mut bases: Vec<V> = self.stations.iter().filter(|s| s.alive).map(|s| s.pos).collect();
+        if bases.is_empty() { return; }
+        bases.sort_by_key(|&b| dist2(b, pp));
+        let base = bases.iter().copied().find(|&b| !near(b, pp, 165)).unwrap_or(bases[0]);
+        let pool: &[Kind] = match self.round {
+            1 => &[Kind::I],
+            2 => &[Kind::I, Kind::I, Kind::P],
+            3 | 4 => &[Kind::I, Kind::P, Kind::P, Kind::E],
+            _ => &[Kind::I, Kind::P, Kind::E, Kind::E],
+        };
+        let kind = pool[rnd(0, pool.len() as i32) as usize];
+        let a = ang_to(base, pp);
+        let sp = stats(kind).sp + N::new(self.round) * num!(0.055);
+        let id = self.next_squad;
+        self.next_squad += 1;
+        self.fighters.push(Fighter { pos: base, a, sp, kind, leader: true, squad: id, slot: 0, mode: Mode::Hunt, wob: rndn(num!(0), num!(1)), dead: false });
+        for (k, &off) in SLOTS.iter().enumerate() {
+            self.fighters.push(Fighter { pos: wrapv(base + rotate(off, a)), a, sp, kind, leader: false, squad: id, slot: k, mode: Mode::Form, wob: num!(0), dead: false });
+        }
+        self.squads.push(Squad { id, t: 0, done: false });
+        self.banner = Some((Banner::BattleStations(kind), 130));
+        self.events.push(Ev::Alert);
+    }
+
+    fn update_fighters(&mut self) {
+        let pp = self.p.pos;
+        let (alive, pa) = (self.p.alive, self.p.a);
+        let round = self.round;
+
+        // spawning: lone fighters arrive from off screen, squadrons from a base
+        if alive && self.clear_t == 0 {
+            self.spawn_t -= 1;
+            let cap = (3 + round).min(10) as usize;
+            if self.spawn_t <= 0 && self.fighters.iter().filter(|f| f.squad == 0).count() < cap {
+                self.spawn_t = (270 - round * 15).max(84) + rnd(0, 90);
+                let a = rndn(num!(0), num!(1));
+                let pos = wrapv(pp + dir(a) * rnd(200, 260)); // just off-screen
+                let sp = num!(1.6) + N::new(round) * num!(0.08) + rndn(num!(-0.09), num!(0.09));
+                self.fighters.push(Fighter { pos, a: (a + num!(0.5)).rem_euclid(N::new(1)), sp, kind: Kind::I, leader: false, squad: 0, slot: 0, mode: Mode::Hunt, wob: rndn(num!(0), num!(1)), dead: false });
+            }
+            self.squad_t -= 1;
+            if self.squad_t <= 0 && self.squads.iter().all(|s| s.done) {
+                self.squad_t = (1200 - round * 60).max(540) + rnd(0, 360);
+                self.launch_squad();
+            }
+        }
+
+        // leaders this frame, so wingmen can find their slots
+        let leaders: Vec<(u32, V, N)> = self.fighters.iter().filter(|f| f.leader && !f.dead).map(|f| (f.squad, f.pos, f.a)).collect();
+        let vulnerable = alive && self.p.inv <= 0;
+        let mut hits: Vec<(usize, bool)> = Vec::new(); // (fighter, also kills the player)
+        for (i, f) in self.fighters.iter_mut().enumerate() {
+            if f.dead { continue; }
+            let st = stats(f.kind);
+            match f.mode {
+                Mode::Flee => {
+                    f.a = turn_toward(f.a, ang_to(pp, f.pos), num!(0.0032));
+                    f.pos = wrapv(f.pos + dir(f.a) * f.sp);
+                    if !near(f.pos, pp, 605) { f.dead = true; } // got away
+                    continue;
+                }
+                Mode::Form => {
+                    if let Some(&(_, lp, la)) = leaders.iter().find(|l| l.0 == f.squad) {
+                        let target = wrapv(lp + rotate(SLOTS[f.slot], la));
+                        let d = wdv(target, f.pos);
+                        let len = d.fast_magnitude();
+                        let step = if len / 10 < f.sp * num!(1.4) { len / 10 } else { f.sp * num!(1.4) };
+                        if len > num!(0.5) { f.pos = wrapv(f.pos + d / len * step); }
+                        f.a = la;
+                    } else { f.mode = Mode::Hunt; }
+                }
+                Mode::Hunt => {
+                    f.wob = (f.wob + num!(0.0053)).rem_euclid(N::new(1));
+                    let target = if !alive { f.a + num!(0.064) } else {
+                        match f.kind {
+                            Kind::P => {
+                                // boomerang: come in from the side, never straight down your gun line
+                                let side = if ang_diff(pa, ang_to(pp, f.pos)) >= num!(0) { num!(0.25) } else { num!(-0.25) };
+                                let flank = wrapv(pp + dir(pa + side) * 82);
+                                if near(f.pos, pp, 94) { ang_to(f.pos, pp) } else { ang_to(f.pos, flank) }
+                            }
+                            Kind::E => ang_to(f.pos, pp),
+                            Kind::I => ang_to(f.pos, pp) + f.wob.sin() * num!(0.0557),
+                        }
+                    };
+                    f.a = turn_toward(f.a, target.rem_euclid(N::new(1)), st.turn);
+                    f.pos = wrapv(f.pos + dir(f.a) * f.sp);
+                }
+            }
+            if vulnerable && near(f.pos, pp, 10) { hits.push((i, true)); continue; }
+            if f.squad == 0 && !near(f.pos, pp, 600) { f.dead = true; continue; } // lost you
+            if self.rocks.iter().any(|r| near(r.pos, f.pos, if r.big { 22 } else { 12 })) { hits.push((i, false)); }
+        }
+        let mut crash = false;
+        for (i, player) in hits { self.kill_fighter(i, false); crash |= player; }
+        if crash { self.kill_player(); }
+
+        // a squadron that loses you is recalled; one with nobody left is finished
+        for s in self.squads.iter_mut() { s.t += 1; }
+        for k in 0..self.squads.len() {
+            let id = self.squads[k].id;
+            let lead = self.fighters.iter().find(|f| f.squad == id && f.leader && !f.dead).map(|f| f.pos);
+            if let Some(lp) = lead && self.squads[k].t > 1200 && !near(lp, pp, 825) {
+                for f in self.fighters.iter_mut().filter(|f| f.squad == id) { f.dead = true; }
+            }
+            if self.fighters.iter().all(|f| f.squad != id || f.dead) { self.squads[k].done = true; }
+        }
+    }
+
     /// world position to screen position (centre of the object)
     fn to_screen(&self, pos: V) -> (i32, i32) {
         let d = wdv(pos, self.cam);
@@ -360,8 +549,9 @@ fn on_screen((x, y): (i32, i32), m: i32) -> bool { x > -m && x < SW + m && y > -
 const fn rgb(r: u16, g: u16, b: u16) -> Rgb15 { Rgb15::new((r >> 3) | ((g >> 3) << 5) | ((b >> 3) << 10)) }
 const BLACK: Rgb15 = rgb(0, 0, 0);
 const RADAR_PALETTE: Palette16 = Palette16::new([
+    // 0 clear, 1 field, 2 frame, 3 station, 4 you, 5 P-type, 6 I-type, 7 E-type, 8 squadron leader, 9 missile
     BLACK, rgb(10, 14, 34), rgb(80, 74, 130), rgb(255, 93, 143), rgb(255, 255, 255), rgb(98, 227, 255),
-    BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK, BLACK,
+    rgb(255, 138, 208), rgb(255, 93, 93), rgb(255, 45, 85), rgb(255, 160, 120), BLACK, BLACK, BLACK, BLACK, BLACK, BLACK,
 ]);
 
 /// the whole sector on a 32x32 sprite, centred on you
@@ -378,7 +568,8 @@ fn draw_radar(g: &Game, palette: &PaletteVramSingle) -> SpriteVram {
         }
     };
     for st in g.stations.iter().filter(|s| s.alive) { plot(&mut s, st.pos, 3, true); }
-    for m in &g.miss { plot(&mut s, m.pos, 5, false); }
+    for m in &g.miss { plot(&mut s, m.pos, 9, false); }
+    for f in g.fighters.iter().filter(|f| !f.dead) { plot(&mut s, f.pos, if f.leader { 8 } else { stats(f.kind).radar }, f.leader); }
     plot(&mut s, g.p.pos, 4, true);
     s.to_vram(palette.clone())
 }
@@ -430,6 +621,14 @@ fn draw_world(g: &Game, frame: &mut GraphicsFrame, matrices: &[AffineMatrixObjec
         o.set_pos((s.0 - 8, s.1 - 8));
         world!(o);
     }
+    for f in g.fighters.iter().filter(|f| !f.dead) {
+        let s = g.to_screen(f.pos);
+        if !on_screen(s, 16) { continue; }
+        let st = stats(f.kind);
+        let mut o = ObjectAffine::new(sprites::SHIPS.sprite(if f.leader { st.lead_frame } else { st.frame }), matrices[facing(f.a)].clone(), AffineMode::AffineDouble);
+        o.set_pos((s.0 - 32, s.1 - 32));
+        world!(o);
+    }
     for m in &g.miss {
         let s = g.to_screen(m.pos);
         if !on_screen(s, 8) { continue; }
@@ -469,6 +668,7 @@ fn draw_world(g: &Game, frame: &mut GraphicsFrame, matrices: &[AffineMatrixObjec
 enum Screen {
     Title { sel: usize },
     Board { highlight: Option<usize> },
+    Credits,
     Play,
     Paused { sel: usize },
     GameOver { t: i32 },
@@ -485,9 +685,9 @@ fn cycle(c: u8, step: i32) -> u8 {
 }
 fn name_str(n: &[u8; 3]) -> &str { core::str::from_utf8(n).unwrap_or("???") }
 
-/// a two-item menu with a blinking cursor
-fn menu(text: &mut ui::Text, x: i32, rows: [i32; 2], items: [&str; 2], sel: usize, t: u32) {
-    for k in 0..2 {
+/// a menu with a blinking cursor; one item per row in `rows`
+fn menu(text: &mut ui::Text, x: i32, rows: &[i32], items: &[&str], sel: usize, t: u32) {
+    for k in 0..items.len() {
         let on = k == sel;
         text.put(x - 2, rows[k], if on && (t / 16) % 2 == 0 { ">" } else { " " }, Ink::Amber);
         text.put(x, rows[k], items[k], if on { Ink::Amber } else { Ink::White });
@@ -502,7 +702,7 @@ fn draw_static(text: &mut ui::Text, screen: Screen, g: &Game, board: &scores::Bo
             text.logo(3);
             text.centre(7, "SECTOR PATROL", Ink::Dim);
             text.centre(16, &format!("HI {:07}", board.best()), Ink::Dim);
-            text.centre(18, "PIXEL ART: MATT WALKDEN", Ink::Dim);
+            text.centre(18, "A CONFUSEDGAMEDEV GAME", Ink::Dim);
         }
         Screen::Board { highlight } => {
             text.centre(1, "TOP PILOTS", Ink::Rose);
@@ -516,6 +716,14 @@ fn draw_static(text: &mut ui::Text, screen: Screen, g: &Game, board: &scores::Bo
                     text.put(3, 5 + i as i32, &row, if highlight == Some(i) { Ink::Amber } else { Ink::White });
                 }
             }
+            text.centre(17, "PRESS A", Ink::Dim);
+        }
+        Screen::Credits => {
+            text.centre(1, "CREDITS", Ink::Rose);
+            text.centre(5, "ENGINEERING", Ink::Dim);
+            text.centre(7, "JORGE PEDRERO", Ink::White);
+            text.centre(10, "ART", Ink::Dim);
+            text.centre(12, "MATT WALKDEN", Ink::White);
             text.centre(17, "PRESS A", Ink::Dim);
         }
         Screen::Paused { .. } => {
@@ -578,14 +786,21 @@ fn main(mut gba: agb::Gba) -> ! {
 
         match &mut screen {
             Screen::Title { sel } => {
-                if ud != 0 { *sel ^= 1; audio.play(Ev::Move); }
+                if ud != 0 { *sel = (*sel as i32 + ud).rem_euclid(3) as usize; audio.play(Ev::Move); }
                 if ok {
                     audio.play(Ev::Select);
-                    if *sel == 0 { g = Game::new(); next = Some(Screen::Play); } else { next = Some(Screen::Board { highlight: None }); }
+                    next = Some(match *sel {
+                        0 => { g = Game::new(); Screen::Play }
+                        1 => Screen::Board { highlight: None },
+                        _ => Screen::Credits,
+                    });
                 }
             }
             Screen::Board { .. } => {
-                if ok || pressed(Button::B) { audio.play(Ev::Select); next = Some(Screen::Title { sel: 0 }); }
+                if ok || pressed(Button::B) { audio.play(Ev::Select); next = Some(Screen::Title { sel: 1 }); }
+            }
+            Screen::Credits => {
+                if ok || pressed(Button::B) { audio.play(Ev::Select); next = Some(Screen::Title { sel: 2 }); }
             }
             Screen::Play => {
                 if pressed(Button::Start) { audio.play(Ev::Move); next = Some(Screen::Paused { sel: 0 }); }
@@ -629,15 +844,16 @@ fn main(mut gba: agb::Gba) -> ! {
         // the menus get the calm loop; in play the band drops out while you respawn and gets busier
         // while a station has you in range
         let playing = matches!(screen, Screen::Play);
-        let in_menus = matches!(screen, Screen::Title { .. } | Screen::Board { .. } | Screen::Entry { .. });
+        let in_menus = matches!(screen, Screen::Title { .. } | Screen::Board { .. } | Screen::Credits | Screen::Entry { .. });
         audio.alive = in_menus || (playing && g.p.alive);
-        audio.tense = playing && g.p.alive && g.stations.iter().any(|s| s.alive && near(s.pos, g.p.pos, 310));
+        audio.tense = playing && g.p.alive && (g.stations.iter().any(|s| s.alive && near(s.pos, g.p.pos, 310))
+            || !g.squads.is_empty() || g.fighters.iter().any(|f| near(f.pos, g.p.pos, 290)));
 
         // ---- text ----
         if redraw { draw_static(&mut text, screen, &g, &board); redraw = false; shown_banner = None; }
         match screen {
-            Screen::Title { sel } => menu(&mut text, 11, [11, 13], ["LAUNCH", "TOP PILOTS"], sel, t),
-            Screen::Paused { sel } => menu(&mut text, 10, [9, 11], ["RESUME", "QUIT TO TITLE"], sel, t),
+            Screen::Title { sel } => menu(&mut text, 11, &[10, 12, 14], &["LAUNCH", "TOP PILOTS", "CREDITS"], sel, t),
+            Screen::Paused { sel } => menu(&mut text, 10, &[9, 11], &["RESUME", "QUIT TO TITLE"], sel, t),
             Screen::Entry { name, pos } => {
                 for k in 0..3 {
                     let blink = k == pos && (t / 12) % 2 == 1;
@@ -650,9 +866,16 @@ fn main(mut gba: agb::Gba) -> ! {
                 let now = g.banner.map(|b| b.0);
                 if now != shown_banner {
                     text.clear_row(6);
+                    text.clear_row(7);
                     match now {
                         Some(Banner::Round(n)) => text.centre(6, &format!("ROUND {}", n), Ink::Amber),
                         Some(Banner::Clear) => text.centre(6, "SECTOR CLEAR", Ink::Amber),
+                        Some(Banner::BattleStations(k)) => {
+                            text.centre(6, "BATTLE STATIONS", Ink::Rose);
+                            text.centre(7, &format!("{}-TYPE SQUADRON INBOUND", stats(k).name), Ink::White);
+                        }
+                        Some(Banner::Broken) => text.centre(6, "FORMATION BROKEN", Ink::Amber),
+                        Some(Banner::Squadron(b)) => text.centre(6, &format!("SQUADRON +{}", b), Ink::Amber),
                         None => {}
                     }
                     shown_banner = now;

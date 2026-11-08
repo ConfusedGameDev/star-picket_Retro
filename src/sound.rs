@@ -27,7 +27,13 @@ static BIG: SoundData = include_wav!("sfx/big.wav");
 static DIE: SoundData = include_wav!("sfx/die.wav");
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Ev { Die, Station, Pod, Hit, Missile, Rock, Launch, /** menu cursor */ Move, /** menu choice */ Select }
+pub enum Ev {
+    Die, Station, Pod, Hit, Missile, Rock, Launch,
+    /// enemy ships: a fighter, a squadron leader, a whole squadron wiped out, a squadron launching
+    Fighter, Leader, Squad, Alert,
+    /// menu cursor and menu choice
+    Move, Select,
+}
 
 /// MIDI notes of each chord: Am, F, C, G
 const PROG: [[i32; 3]; 4] = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]];
@@ -142,16 +148,26 @@ impl<'gba> Audio<'gba> {
             Ev::Launch => self.now(BLIP, A4, ch[0], 40, false),
             Ev::Die => self.now_with(DIE, UNPITCHED, 0, 230, true, true),
             Ev::Move => self.now(BLIP, A4, ch[1] + 12, 70, false),
+            // "battle stations": two quick high blips
+            Ev::Alert => { self.now(BLIP, A4, ch[2] + 12, 90, true); self.at(self.step + 2, BLIP, A4, ch[2] + 12, 90); }
             // a short chord-tone figure, off the grid so the menu answers at once
             Ev::Select => { self.now(PLUCK, A4, ch[0] + 12, 120, true); self.at(self.step + 1, PLUCK, A4, ch[2] + 12, 100); }
             _ => {
                 // an instant crunch so the hit feels immediate, then the note on the grid
-                let (crunch, cv) = match ev { Ev::Station => (BIG, 230), Ev::Pod => (BOOM, 110), _ => (BOOM, 70) };
-                self.now(crunch, UNPITCHED, 0, cv, false);
+                let (crunch, cv) = match ev { Ev::Station => (BIG, 230), Ev::Pod | Ev::Leader => (BOOM, 110), Ev::Squad => (BOOM, 0), _ => (BOOM, 70) };
+                if cv > 0 { self.now(crunch, UNPITCHED, 0, cv, false); }
                 let Some(n) = self.book() else { return };
                 let (m, l) = self.melody(n);
                 match ev {
                     Ev::Rock => self.with_echo(n, PLUCK, A4, m + 12, 90),
+                    Ev::Fighter => self.with_echo(n, PLUCK, A4, m, 120),
+                    // a leader is a two-note chord
+                    Ev::Leader => { self.with_echo(n, PLUCK, A4, m, 110); self.at(n, PLUCK, A4, l[(self.pos as usize + 2).min(8)], 95); }
+                    // a whole squadron: a run up the ladder
+                    Ev::Squad => {
+                        for (i, &t) in l.iter().take(6).enumerate() { self.at(n + i as u32, PLUCK, A4, t, 110); }
+                        self.slot = n + 5;
+                    }
                     Ev::Missile => self.at(n, PLUCK, A4, m + 12, 70),
                     Ev::Pod => self.with_echo(n, BELL, A4, m - 12, 200),
                     Ev::Station => {

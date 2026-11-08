@@ -17,7 +17,7 @@ with a flash cart.
 
 ## What's in this prototype
 
-- Title screen with LAUNCH and TOP PILOTS, over the drifting starfield.
+- Title screen with LAUNCH, TOP PILOTS and CREDITS, over the drifting starfield.
 - A local leaderboard of the top ten patrols (callsign, round reached, score), saved in the cartridge's
   battery-backed SRAM so it survives power-off. Make the top ten and you enter a three-letter callsign arcade-style:
   Up/Down changes the letter, A moves on, B goes back. Your last callsign is offered next time.
@@ -27,12 +27,18 @@ with a flash cart.
 - The player ship and bullets rotated by the GBA's hardware: 32 facings, one shared rotation matrix each.
 - Hex stations: shoot out all six cannon pods (200 each) or hit the core three times (1500 for the station).
   Stations launch homing missiles when you are in range. Clear every station to start the next round.
-- Drifting asteroids, explosions, score, three lives, and a radar of the whole sector.
+- Enemy ships. Lone fighters arrive from off-screen and hunt you. Squadrons of five fly in a V from the nearest
+  base ("BATTLE STATIONS"), in three types: I weaves at you, P swings in from your flank like a boomerang, E is a
+  fast dart that barely turns. Kill the leader and the wingmen break off and flee; shoot down all five for a bonus
+  (500 / 1000 / 1500). Fighters 50 / 60 / 70, leaders 100 / 120 / 140. They're faster relative to you than on
+  the web, because the GBA screen shows far less of the sector.
+- Drifting asteroids, explosions, score, three lives, and a radar of the whole sector (fighters show in their
+  type's colour, leaders larger).
 - The music system from the web version: a 124 BPM loop over Am · F · C · G, kill notes snapped to the next 16th
   and pitched from the current chord, kill streaks that climb the chord, and a fake dotted-eighth echo. The drums and
   bass get busier while a station has you in range.
 
-Not ported yet: squadrons, the spy ship, Condition Yellow/Red, the five station designs, mines, voice callouts,
+Not ported yet: the spy ship, Condition Yellow/Red, the five station designs, mines, voice callouts,
 and the art style toggle. The online leaderboard and share card can't come over: the GBA has no network, so the
 leaderboard is local.
 
@@ -48,7 +54,8 @@ agb-gbafix target/thumbv4t-none-eabi/release/star-picket-retro -o dist/star-pick
 ```
 
 `cargo run --release` builds and opens the game in `mgba-qt` if it's on your PATH.
-`cargo build --release --features showcase` parks a station right in front of the start position, for testing.
+`cargo build --release --features showcase` parks a station right in front of the start position and launches a
+squadron within a second, for testing.
 `cargo build --release --features quickover` gives you one ship that explodes 3 seconds in, for testing the menus.
 `cargo build --release --features soundcheck` plays every pitched instrument at every note the game can use and
 logs the result to mGBA's log: run it after changing the sounds or the pitch maths.
