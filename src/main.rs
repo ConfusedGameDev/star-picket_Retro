@@ -99,7 +99,8 @@ fn zero() -> V { vec2(N::new(0), N::new(0)) }
 // ---------- game state ----------
 struct Player { pos: V, a: N, v: N, inv: i32, alive: bool, dead_t: i32 }
 struct Bullet { pos: V, vel: V, life: i32, f: usize }
-struct Station { pos: V, pods: [i8; 6], pod_flash: [u8; 6], core: i8, core_flash: u8, alive: bool, fire_t: i32 }
+/// `alerted` counts down while the base knows you're near (or just shot at it): that's Condition Yellow
+struct Station { pos: V, pods: [i8; 6], pod_flash: [u8; 6], core: i8, core_flash: u8, alive: bool, fire_t: i32, alerted: i32 }
 struct Missile { pos: V, a: N, life: i32 }
 struct Rock { pos: V, vel: V, big: bool }
 struct Boom { pos: V, t: i32 }
@@ -122,6 +123,14 @@ fn stats(k: Kind) -> KindStats {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode { Hunt, Form, Flee }
 struct Fighter { pos: V, a: N, sp: N, kind: Kind, leader: bool, squad: u32, slot: usize, mode: Mode, wob: N, dead: bool }
+/// The spy ship circles you at a distance. Three long looks and it gets away with your position.
+struct Spy { pos: V, a: N, sp: N, passes: i32, far: i32, orbit: N, wob: N }
+/// why the condition changed, for the banner
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Why { Noticed, TooLong, Reported }
+pub const GREEN: u8 = 0;
+pub const YELLOW: u8 = 1;
+pub const RED: u8 = 2;
 /// squad 0 means a lone fighter
 struct Squad { id: u32, t: i32, done: bool }
 /// wingmen hold a V behind the leader, in the leader's frame (x forward, y to the side)
@@ -141,6 +150,14 @@ struct Game {
     next_squad: u32,
     spawn_t: i32,
     squad_t: i32,
+    spy: Option<Spy>,
+    spy_t: i32,
+    spy_streak: usize,
+    /// alert condition: GREEN, YELLOW or RED. `cond_min` is the floor the clock has raised it to.
+    cond: u8,
+    cond_min: u8,
+    round_t: i32,
+    siren_t: i32,
     events: Vec<Ev>,
     score: u32,
     lives: i32,
@@ -155,7 +172,7 @@ struct Game {
 
 /// short messages shown mid-screen during play
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Banner { Round(i32), Clear, BattleStations(Kind), Broken, Squadron(u32) }
+enum Banner { Round(i32), Clear, BattleStations(Kind), Broken, Squadron(u32), Yellow(Why), Red(Why), SpySighted, SpyDown(u32) }
 
 impl Game {
     fn new() -> Self {
@@ -165,6 +182,7 @@ impl Game {
             cam: mid,
             bullets: Vec::new(), stations: Vec::new(), miss: Vec::new(), rocks: Vec::new(), booms: Vec::new(), events: Vec::new(),
             fighters: Vec::new(), squads: Vec::new(), next_squad: 1, spawn_t: 0, squad_t: 0,
+            spy: None, spy_t: 0, spy_streak: 0, cond: GREEN, cond_min: GREEN, round_t: 0, siren_t: 0,
             score: 0, lives: if cfg!(feature = "quickover") { 1 } else { 3 }, round: 0, fire_t: 0, clear_t: 0, over: false, banner: None, frame: 0,
         };
         g.next_round();
@@ -177,13 +195,16 @@ impl Game {
         self.stations.clear(); self.miss.clear(); self.rocks.clear(); self.fighters.clear(); self.squads.clear();
         self.spawn_t = 240; // 4 s before the first lone fighter
         self.squad_t = rnd(540, 840); // 9 to 14 s before the first squadron
+        self.spy = None;
+        self.spy_t = rnd(840, 1320); // 14 to 22 s before the spy ship
+        self.cond = GREEN; self.cond_min = GREEN; self.round_t = 0;
         let n = (3 + self.round).min(10) as usize;
         let mut tries = 0;
         while self.stations.len() < n && tries < 2000 {
             tries += 1;
             let pos = vec2(N::new(rnd(0, WS)), N::new(rnd(0, WS)));
             if near(pos, self.p.pos, 360) || self.stations.iter().any(|s| near(s.pos, pos, 400)) { continue; }
-            self.stations.push(Station { pos, pods: [2; 6], pod_flash: [0; 6], core: 3, core_flash: 0, alive: true, fire_t: rnd(60, 180) });
+            self.stations.push(Station { pos, pods: [2; 6], pod_flash: [0; 6], core: 3, core_flash: 0, alive: true, fire_t: rnd(60, 180), alerted: 0 });
         }
         // `cargo build --features showcase`: park the first station just ahead of you, for screenshots and testing
         if cfg!(feature = "showcase") && self.round == 1 {
@@ -192,6 +213,8 @@ impl Game {
             self.rocks.retain(|r| !near(r.pos, pp, 200));
             self.squad_t = 60; // and send a squadron right away
             self.spawn_t = 90;
+            self.spy_t = 120; // and the spy ship
+            self.round_t = 5100 - 150 - 900; // and Condition Red 15 s in
         }
         tries = 0;
         while self.rocks.len() < 30 && tries < 3000 {
@@ -291,8 +314,10 @@ impl Game {
             if !s.alive { continue; }
             for f in s.pod_flash.iter_mut() { *f = f.saturating_sub(1); }
             s.core_flash = s.core_flash.saturating_sub(1);
+            if s.alerted > 0 { s.alerted -= 1; }
             if !self.p.alive { continue; }
             if near(s.pos, self.p.pos, 310) {
+                s.alerted = s.alerted.max(120);
                 s.fire_t -= 1;
                 if s.fire_t <= 0 {
                     s.fire_t = (102 - round * 5).max(42) + rnd(0, 48);
@@ -312,7 +337,13 @@ impl Game {
         }
         if crash { self.kill_player(); }
 
+        if self.p.alive && self.clear_t == 0 { self.update_cond(); }
+        if self.cond == RED {
+            self.siren_t -= 1;
+            if self.siren_t <= 0 { self.siren_t = 144; self.events.push(Ev::Siren); }
+        }
         self.update_fighters();
+        self.update_spy();
 
         // --- missiles home in ---
         let pp = self.p.pos;
@@ -350,7 +381,7 @@ impl Game {
             if !s.alive || !near(s.pos, at, 34) { continue; }
             for k in 0..6 {
                 if s.pods[k] > 0 && near(s.pos + pod_off(k), at, 8) {
-                    s.pods[k] -= 1; s.pod_flash[k] = 5;
+                    s.pods[k] -= 1; s.pod_flash[k] = 5; s.alerted = 360;
                     if s.pods[k] == 0 {
                         let pos = wrapv(s.pos + pod_off(k));
                         let all_gone = s.pods.iter().all(|&h| h == 0);
@@ -363,12 +394,13 @@ impl Game {
                 }
             }
             if near(s.pos, at, 9) {
-                s.core -= 1; s.core_flash = 6;
+                s.core -= 1; s.core_flash = 6; s.alerted = 360;
                 let dead = s.core <= 0;
                 if dead { self.destroy_station(i); } else { self.events.push(Ev::Hit); }
                 return true;
             }
         }
+        if self.spy.as_ref().is_some_and(|s| near(s.pos, at, 9)) { self.kill_spy(); return true; }
         if let Some(i) = self.fighters.iter().position(|f| !f.dead && near(f.pos, at, 8)) {
             self.kill_fighter(i, true);
             return true;
@@ -424,6 +456,94 @@ impl Game {
         }
     }
 
+    /// raise the condition (it never drops within a round once the clock or the spy has raised it)
+    fn set_cond(&mut self, c: u8, why: Why) {
+        if c <= self.cond { return; }
+        self.cond = c;
+        if c == RED {
+            self.cond_min = RED;
+            self.siren_t = 0;
+            self.banner = Some((Banner::Red(why), 180));
+            self.events.push(Ev::Alert);
+            // the bases commit what they have: a squadron right away and singles pour in
+            self.squad_t = self.squad_t.min(90);
+            self.spawn_t = self.spawn_t.min(30);
+        } else {
+            self.banner = Some((Banner::Yellow(why), 110));
+        }
+    }
+
+    fn update_cond(&mut self) {
+        self.round_t += 1;
+        let (yellow_at, red_at) = (1800, (5100 - self.round * 150).max(3000)); // 30 s; 85 s falling to 50 s
+        if self.round_t > red_at && self.cond < RED { self.set_cond(RED, Why::TooLong); }
+        else if self.round_t > yellow_at && self.cond_min < YELLOW { self.cond_min = YELLOW; self.set_cond(YELLOW, Why::Noticed); }
+        if self.cond == RED { return; }
+        // otherwise Yellow is situational: a base that has noticed you, ships near you, a squadron or the spy
+        let pp = self.p.pos;
+        let threat = self.cond_min == YELLOW
+            || self.stations.iter().any(|s| s.alive && s.alerted > 0)
+            || self.fighters.iter().any(|f| !f.dead && near(f.pos, pp, 286))
+            || !self.squads.is_empty()
+            || self.spy.is_some();
+        self.cond = if threat { YELLOW } else { GREEN };
+    }
+
+    fn update_spy(&mut self) {
+        let pp = self.p.pos;
+        let Some(s) = self.spy.as_mut() else {
+            if self.p.alive && self.clear_t == 0 {
+                self.spy_t -= 1;
+                if self.spy_t <= 0 {
+                    let a = rndn(num!(0), num!(1));
+                    self.spy = Some(Spy {
+                        pos: wrapv(pp + dir(a) * 286), a: (a + num!(0.5) + rndn(num!(-0.095), num!(0.095))).rem_euclid(N::new(1)),
+                        sp: num!(2.3) + N::new(self.round) * num!(0.07), passes: 0, far: 0,
+                        orbit: if rnd(0, 2) == 0 { num!(1) } else { num!(-1) }, wob: rndn(num!(0), num!(1)),
+                    });
+                    self.banner = Some((Banner::SpySighted, 130));
+                    self.events.push(Ev::SpySighted);
+                }
+            }
+            return;
+        };
+        // glide past at a distance, then swing round for another look
+        let off = if near(s.pos, pp, 165) { num!(0.215) } else { num!(0.0875) };
+        s.wob = (s.wob + num!(0.008)).rem_euclid(N::new(1));
+        let want = ang_to(s.pos, pp) + s.orbit * off + s.wob.sin() * num!(0.032);
+        s.a = turn_toward(s.a, want.rem_euclid(N::new(1)), num!(0.0042));
+        s.pos = wrapv(s.pos + dir(s.a) * s.sp);
+        let mut escaped = false;
+        if !near(s.pos, pp, 308) {
+            s.far += 1;
+            if s.far > 72 {
+                s.far = 0;
+                s.passes += 1;
+                if s.passes > 2 { escaped = true; } else { s.a = ang_to(s.pos, pp); s.orbit = -s.orbit; }
+            }
+        } else { s.far = 0; }
+        let crash = self.p.alive && self.p.inv <= 0 && near(s.pos, pp, 9);
+        if escaped {
+            // it got away with your position
+            self.spy = None;
+            self.spy_t = rnd(1200, 1920);
+            self.spy_streak = 0;
+            self.set_cond(RED, Why::Reported);
+        } else if crash { self.kill_player(); }
+    }
+
+    fn kill_spy(&mut self) {
+        let Some(s) = self.spy.take() else { return };
+        let v = [200, 400, 800][self.spy_streak.min(2)];
+        self.spy_streak += 1;
+        self.score += v;
+        self.booms.push(Boom { pos: s.pos, t: 0 });
+        self.booms.push(Boom { pos: s.pos + vec2(N::new(6), N::new(4)), t: -6 });
+        self.banner = Some((Banner::SpyDown(v), 110));
+        self.events.push(Ev::Spy);
+        self.spy_t = rnd(1080, 1800);
+    }
+
     /// a five-ship V launched from the nearest base that isn't right on top of you
     fn launch_squad(&mut self) {
         let pp = self.p.pos;
@@ -439,7 +559,7 @@ impl Game {
         };
         let kind = pool[rnd(0, pool.len() as i32) as usize];
         let a = ang_to(base, pp);
-        let sp = stats(kind).sp + N::new(self.round) * num!(0.055);
+        let sp = stats(kind).sp + N::new(self.round) * num!(0.055) + if self.cond == RED { num!(0.23) } else { num!(0) };
         let id = self.next_squad;
         self.next_squad += 1;
         self.fighters.push(Fighter { pos: base, a, sp, kind, leader: true, squad: id, slot: 0, mode: Mode::Hunt, wob: rndn(num!(0), num!(1)), dead: false });
@@ -458,18 +578,21 @@ impl Game {
 
         // spawning: lone fighters arrive from off screen, squadrons from a base
         if alive && self.clear_t == 0 {
+            // Condition Red: fighters pour in from every direction until the sector is cleared
+            let red = self.cond == RED;
             self.spawn_t -= 1;
-            let cap = (3 + round).min(10) as usize;
+            let cap = if red { 26 } else { (3 + round).min(10) as usize };
             if self.spawn_t <= 0 && self.fighters.iter().filter(|f| f.squad == 0).count() < cap {
-                self.spawn_t = (270 - round * 15).max(84) + rnd(0, 90);
+                self.spawn_t = if red { rnd(30, 66) } else { (270 - round * 15).max(84) + rnd(0, 90) };
                 let a = rndn(num!(0), num!(1));
                 let pos = wrapv(pp + dir(a) * rnd(200, 260)); // just off-screen
-                let sp = num!(1.6) + N::new(round) * num!(0.08) + rndn(num!(-0.09), num!(0.09));
+                let sp = num!(1.6) + N::new(round) * num!(0.08) + rndn(num!(-0.09), num!(0.09)) + if red { num!(0.32) } else { num!(0) };
                 self.fighters.push(Fighter { pos, a: (a + num!(0.5)).rem_euclid(N::new(1)), sp, kind: Kind::I, leader: false, squad: 0, slot: 0, mode: Mode::Hunt, wob: rndn(num!(0), num!(1)), dead: false });
             }
             self.squad_t -= 1;
-            if self.squad_t <= 0 && self.squads.iter().all(|s| s.done) {
-                self.squad_t = (1200 - round * 60).max(540) + rnd(0, 360);
+            let flying = self.squads.iter().filter(|s| !s.done).count();
+            if self.squad_t <= 0 && flying < if red { 3 } else { 1 } {
+                self.squad_t = if red { rnd(360, 540) } else { (1200 - round * 60).max(540) + rnd(0, 360) };
                 self.launch_squad();
             }
         }
@@ -549,9 +672,9 @@ fn on_screen((x, y): (i32, i32), m: i32) -> bool { x > -m && x < SW + m && y > -
 const fn rgb(r: u16, g: u16, b: u16) -> Rgb15 { Rgb15::new((r >> 3) | ((g >> 3) << 5) | ((b >> 3) << 10)) }
 const BLACK: Rgb15 = rgb(0, 0, 0);
 const RADAR_PALETTE: Palette16 = Palette16::new([
-    // 0 clear, 1 field, 2 frame, 3 station, 4 you, 5 P-type, 6 I-type, 7 E-type, 8 squadron leader, 9 missile
+    // 0 clear, 1 field, 2 frame, 3 station, 4 you, 5 P-type, 6 I-type, 7 E-type, 8 squadron leader, 9 missile, 10 spy
     BLACK, rgb(10, 14, 34), rgb(80, 74, 130), rgb(255, 93, 143), rgb(255, 255, 255), rgb(98, 227, 255),
-    rgb(255, 138, 208), rgb(255, 93, 93), rgb(255, 45, 85), rgb(255, 160, 120), BLACK, BLACK, BLACK, BLACK, BLACK, BLACK,
+    rgb(255, 138, 208), rgb(255, 93, 93), rgb(255, 45, 85), rgb(255, 160, 120), rgb(255, 240, 74), BLACK, BLACK, BLACK, BLACK, BLACK,
 ]);
 
 /// the whole sector on a 32x32 sprite, centred on you
@@ -570,6 +693,7 @@ fn draw_radar(g: &Game, palette: &PaletteVramSingle) -> SpriteVram {
     for st in g.stations.iter().filter(|s| s.alive) { plot(&mut s, st.pos, 3, true); }
     for m in &g.miss { plot(&mut s, m.pos, 9, false); }
     for f in g.fighters.iter().filter(|f| !f.dead) { plot(&mut s, f.pos, if f.leader { 8 } else { stats(f.kind).radar }, f.leader); }
+    if let Some(sp) = &g.spy && (g.frame / 8) % 2 == 0 { plot(&mut s, sp.pos, 10, true); }
     plot(&mut s, g.p.pos, 4, true);
     s.to_vram(palette.clone())
 }
@@ -628,6 +752,14 @@ fn draw_world(g: &Game, frame: &mut GraphicsFrame, matrices: &[AffineMatrixObjec
         let mut o = ObjectAffine::new(sprites::SHIPS.sprite(if f.leader { st.lead_frame } else { st.frame }), matrices[facing(f.a)].clone(), AffineMode::AffineDouble);
         o.set_pos((s.0 - 32, s.1 - 32));
         world!(o);
+    }
+    if let Some(sp) = &g.spy {
+        let s = g.to_screen(sp.pos);
+        if on_screen(s, 16) {
+            let mut o = ObjectAffine::new(sprites::SHIPS.sprite(8), matrices[facing(sp.a)].clone(), AffineMode::AffineDouble);
+            o.set_pos((s.0 - 32, s.1 - 32));
+            world!(o);
+        }
     }
     for m in &g.miss {
         let s = g.to_screen(m.pos);
@@ -772,6 +904,7 @@ fn main(mut gba: agb::Gba) -> ! {
     let mut screen = Screen::Title { sel: 0 };
     let mut redraw = true;
     let mut shown_banner: Option<Banner> = None;
+    let mut shown_cond: Option<(u8, bool)> = None; // condition readout under the radar, and its blink
     let mut demo = vec2(N::new(0), N::new(0)); // starfield drift behind the menus
     let mut t: u32 = 0;
 
@@ -846,11 +979,11 @@ fn main(mut gba: agb::Gba) -> ! {
         let playing = matches!(screen, Screen::Play);
         let in_menus = matches!(screen, Screen::Title { .. } | Screen::Board { .. } | Screen::Credits | Screen::Entry { .. });
         audio.alive = in_menus || (playing && g.p.alive);
-        audio.tense = playing && g.p.alive && (g.stations.iter().any(|s| s.alive && near(s.pos, g.p.pos, 310))
-            || !g.squads.is_empty() || g.fighters.iter().any(|f| near(f.pos, g.p.pos, 290)));
+        audio.tense = playing && g.p.alive && g.cond >= YELLOW;
+        audio.red = playing && g.p.alive && g.cond == RED;
 
         // ---- text ----
-        if redraw { draw_static(&mut text, screen, &g, &board); redraw = false; shown_banner = None; }
+        if redraw { draw_static(&mut text, screen, &g, &board); redraw = false; shown_banner = None; shown_cond = None; }
         match screen {
             Screen::Title { sel } => menu(&mut text, 11, &[10, 12, 14], &["LAUNCH", "TOP PILOTS", "CREDITS"], sel, t),
             Screen::Paused { sel } => menu(&mut text, 10, &[9, 11], &["RESUME", "QUIT TO TITLE"], sel, t),
@@ -865,24 +998,52 @@ fn main(mut gba: agb::Gba) -> ! {
             Screen::Play => {
                 let now = g.banner.map(|b| b.0);
                 if now != shown_banner {
-                    text.clear_row(6);
                     text.clear_row(7);
+                    text.clear_row(8);
                     match now {
-                        Some(Banner::Round(n)) => text.centre(6, &format!("ROUND {}", n), Ink::Amber),
-                        Some(Banner::Clear) => text.centre(6, "SECTOR CLEAR", Ink::Amber),
+                        Some(Banner::Round(n)) => text.centre(7, &format!("ROUND {}", n), Ink::Amber),
+                        Some(Banner::Clear) => text.centre(7, "SECTOR CLEAR", Ink::Amber),
                         Some(Banner::BattleStations(k)) => {
-                            text.centre(6, "BATTLE STATIONS", Ink::Rose);
-                            text.centre(7, &format!("{}-TYPE SQUADRON INBOUND", stats(k).name), Ink::White);
+                            text.centre(7, "BATTLE STATIONS", Ink::Rose);
+                            text.centre(8, &format!("{}-TYPE SQUADRON INBOUND", stats(k).name), Ink::White);
                         }
-                        Some(Banner::Broken) => text.centre(6, "FORMATION BROKEN", Ink::Amber),
-                        Some(Banner::Squadron(b)) => text.centre(6, &format!("SQUADRON +{}", b), Ink::Amber),
+                        Some(Banner::Broken) => text.centre(7, "FORMATION BROKEN", Ink::Amber),
+                        Some(Banner::Squadron(b)) => text.centre(7, &format!("SQUADRON +{}", b), Ink::Amber),
+                        Some(Banner::Yellow(_)) => {
+                            text.centre(7, "CONDITION YELLOW", Ink::Amber);
+                            text.centre(8, "THE SECTOR KNOWS YOU'RE HERE", Ink::White);
+                        }
+                        Some(Banner::Red(why)) => {
+                            text.centre(7, "CONDITION RED", Ink::Rose);
+                            text.centre(8, if why == Why::Reported { "THE SPY SHIP REPORTED IN" } else { "YOU STAYED TOO LONG" }, Ink::White);
+                        }
+                        Some(Banner::SpySighted) => {
+                            text.centre(7, "SPY SHIP SIGHTED", Ink::Amber);
+                            text.centre(8, "SHOOT IT BEFORE IT REPORTS", Ink::White);
+                        }
+                        Some(Banner::SpyDown(v)) => text.centre(7, &format!("SPY SHIP DOWN +{}", v), Ink::Amber),
                         None => {}
                     }
                     shown_banner = now;
                 }
+                // CONDITION GREEN / YELLOW / RED under the radar; red blinks
+                let blink = g.cond == RED && (t / 8) % 2 == 1;
+                if shown_cond != Some((g.cond, blink)) {
+                    let (label, ink) = match g.cond { RED => ("CONDITION RED", if blink { Ink::Dim } else { Ink::Rose }), YELLOW => ("CONDITION YELLOW", Ink::Amber), _ => ("CONDITION GREEN", Ink::Green) };
+                    text.clear_row(5);
+                    text.put(ui::COLS - label.len() as i32, 5, label, ink);
+                    shown_cond = Some((g.cond, blink));
+                }
             }
             _ => {}
         }
+
+        // Condition Red: the space behind everything throbs dark red
+        let throb = if matches!(screen, Screen::Play) && g.cond == RED {
+            let pulse = (N::new((t % 64) as i32) / 64).sin() + num!(1); // 0..2
+            (pulse * 36).floor() as u16 + 20
+        } else { 0 };
+        gfx.set_background_palette_colour(0, 0, rgb(throb, 16u16.saturating_sub(throb / 4), 32u16.saturating_sub(throb / 6)));
 
         // ---- picture ----
         let with_world = matches!(screen, Screen::Play | Screen::Paused { .. } | Screen::GameOver { .. });

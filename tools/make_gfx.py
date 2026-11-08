@@ -62,7 +62,17 @@ SHIPS = [  # (row, col): rows green/red/blue, cols small..large
     (0, 3),  # 6 P-type leader
     (1, 2),  # 7 E-type leader
 ]
-save(strip([cell(ships, c * 64 + 32, r * 64 + 32, 32) for r, c in SHIPS]), "ships.png")
+frames = [cell(ships, c * 64 + 32, r * 64 + 32, 32) for r, c in SHIPS]
+# 8: the spy ship, the small green ship recoloured yellow like the web version's spy
+spy = cell(ships, 32, 32, 32)
+px = spy.load()
+for y in range(32):
+    for x in range(32):
+        r, g, b, a = px[x, y]
+        if a and g > r and g > b:  # green hull -> yellow
+            px[x, y] = (min(255, g + 40), min(255, g + 30), b // 2, a)
+frames.append(spy)
+save(strip(frames), "ships.png")
 
 save(cell(load("Fx_02.png"), 24, 8, 16), "bolt.png")
 save(cell(load("Missiles.png"), 64 + 32, 32, 16), "missile.png")
@@ -126,7 +136,7 @@ save(font, "digits.png")
 
 # Menu font: background tiles, one 8x8 cell per glyph, one row per ink colour.
 # The game maps characters through the same GLYPHS string (src/ui.rs), so keep the two in step.
-GLYPHS = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:!?/><#'()_"
+GLYPHS = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:!?/><#'()_+"
 LETTERS = {
     "A": "01110 10001 10001 11111 10001 10001 10001", "B": "11110 10001 10001 11110 10001 10001 11110",
     "C": "01110 10001 10000 10000 10000 10001 01110", "D": "11110 10001 10001 10001 10001 10001 11110",
@@ -148,12 +158,14 @@ LETTERS = {
     "#": "01010 01010 11111 01010 11111 01010 01010", "'": "00100 00100 01000 00000 00000 00000 00000",
     "(": "00010 00100 01000 01000 01000 00100 00010", ")": "01000 00100 00010 00010 00010 00100 01000",
     "_": "00000 00000 00000 00000 00000 00000 11111",
+    "+": "00000 00100 00100 11111 00100 00100 00000",
 }
 for i, glyph in enumerate(DIGITS):
     LETTERS[str(i)] = glyph
-INKS = [  # (glyph, shadow): white, amber, dim, rose, as in the web version
+INKS = [  # (glyph, shadow): white, amber, dim, rose, green, as in the web version
     ((236, 232, 255), (24, 20, 52)), ((255, 200, 97), (70, 40, 10)),
     ((141, 134, 184), (20, 18, 40)), ((255, 93, 143), (60, 14, 34)),
+    ((139, 224, 180), (14, 40, 30)),  # green, for CONDITION GREEN
 ]
 menu = Image.new("RGBA", (8 * len(GLYPHS), 8 * len(INKS)), (0, 0, 0, 0))
 for row, (ink, shade) in enumerate(INKS):

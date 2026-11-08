@@ -25,12 +25,15 @@ static CLAP: SoundData = include_wav!("sfx/clap.wav");
 static BOOM: SoundData = include_wav!("sfx/boom.wav");
 static BIG: SoundData = include_wav!("sfx/big.wav");
 static DIE: SoundData = include_wav!("sfx/die.wav");
+static SIREN: SoundData = include_wav!("sfx/siren.wav");
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Ev {
     Die, Station, Pod, Hit, Missile, Rock, Launch,
     /// enemy ships: a fighter, a squadron leader, a whole squadron wiped out, a squadron launching
     Fighter, Leader, Squad, Alert,
+    /// the spy ship appears, the spy ship shot down, the Condition Red siren
+    SpySighted, Spy, Siren,
     /// menu cursor and menu choice
     Move, Select,
 }
@@ -83,7 +86,10 @@ pub struct Audio<'gba> {
     sweep: Option<ChannelId>, // soundcheck only
     /// set by the game each frame
     pub alive: bool,
+    /// Condition Yellow or worse: the band gets busier
     pub tense: bool,
+    /// Condition Red: four on the floor, 16th hats, octave bass
+    pub red: bool,
 }
 
 impl<'gba> Audio<'gba> {
@@ -91,7 +97,7 @@ impl<'gba> Audio<'gba> {
         Audio {
             mixer: controller.mixer(Frequency::Hz18157),
             clock: num!(0), step: 0, slot: 0, queue: Vec::new(), pos: 0, dir: 1, last_kill: 0, frame: 0, high: Vec::new(), sweep: None,
-            alive: true, tense: false,
+            alive: true, tense: false, red: false,
         }
     }
 
@@ -150,6 +156,9 @@ impl<'gba> Audio<'gba> {
             Ev::Move => self.now(BLIP, A4, ch[1] + 12, 70, false),
             // "battle stations": two quick high blips
             Ev::Alert => { self.now(BLIP, A4, ch[2] + 12, 90, true); self.at(self.step + 2, BLIP, A4, ch[2] + 12, 90); }
+            // three quick, high blips
+            Ev::SpySighted => { for k in 0..3 { self.at(self.step + k * 2, BLIP, A4, ch[2] + 24, 80); } }
+            Ev::Siren => self.now(SIREN, UNPITCHED, 0, 70, false),
             // a short chord-tone figure, off the grid so the menu answers at once
             Ev::Select => { self.now(PLUCK, A4, ch[0] + 12, 120, true); self.at(self.step + 1, PLUCK, A4, ch[2] + 12, 100); }
             _ => {
@@ -161,6 +170,11 @@ impl<'gba> Audio<'gba> {
                 match ev {
                     Ev::Rock => self.with_echo(n, PLUCK, A4, m + 12, 90),
                     Ev::Fighter => self.with_echo(n, PLUCK, A4, m, 120),
+                    // the spy ship: a quick run up the middle of the ladder
+                    Ev::Spy => {
+                        for (i, &t) in l.iter().skip(2).take(5).enumerate() { self.at(n + i as u32, PLUCK, A4, t, 120); }
+                        self.slot = n + 4;
+                    }
                     // a leader is a two-note chord
                     Ev::Leader => { self.with_echo(n, PLUCK, A4, m, 110); self.at(n, PLUCK, A4, l[(self.pos as usize + 2).min(8)], 95); }
                     // a whole squadron: a run up the ladder
@@ -191,14 +205,16 @@ impl<'gba> Audio<'gba> {
         self.queue.retain(|q| q.step > n);
         for q in due { self.now(q.data, q.base, q.m, q.vol, true); }
         if !self.alive { return; }
+        // Green: sparse kick and bass. Yellow: claps, 8th hats and bass. Red: four on the floor, 16th hats.
+        let lvl = if self.red { 2 } else if self.tense { 1 } else { 0 };
         let b = n % 16;
         let root = chord(n)[0] - 24;
-        if b % 8 == 0 || (self.tense && b % 4 == 0) { self.now(KICK, UNPITCHED, 0, if b == 0 { 200 } else { 160 }, false); }
-        if self.tense && b % 8 == 4 { self.now(CLAP, UNPITCHED, 0, 90, false); }
-        let hat = if self.tense { b % 2 == 0 } else { b % 4 == 2 };
-        if hat { self.now(HAT, UNPITCHED, 0, 60, false); }
-        let bass = if self.tense { b % 2 == 0 } else { matches!(b, 0 | 6 | 8 | 14) };
-        if bass { self.now(BASS, A2, root + if self.tense && b % 4 == 2 { 12 } else { 0 }, 140, false); }
+        if b % 8 == 0 || (lvl == 2 && b % 4 == 0) { self.now(KICK, UNPITCHED, 0, if b == 0 { 200 } else { 160 }, false); }
+        if lvl >= 1 && b % 8 == 4 { self.now(CLAP, UNPITCHED, 0, 90, false); }
+        let hat = match lvl { 2 => true, 1 => b % 2 == 0, _ => b % 4 == 2 };
+        if hat { self.now(HAT, UNPITCHED, 0, if lvl == 2 && b % 2 == 1 { 35 } else { 60 }, false); }
+        let bass = match lvl { 2 => matches!(b, 0 | 2 | 3 | 4 | 6 | 8 | 10 | 11 | 12 | 14), 1 => b % 2 == 0, _ => matches!(b, 0 | 6 | 8 | 14) };
+        if bass { self.now(BASS, A2, root + if lvl == 2 && b % 4 == 2 { 12 } else { 0 }, 140, false); }
     }
 
     /// call once per frame

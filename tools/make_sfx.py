@@ -111,3 +111,12 @@ for i in range(L):
     ph += (50 + 470 * math.exp(-t / 0.35)) / RATE
     out.append((0.6 * saw(ph) + 0.5 * noise[i]) * env(t, 0.002, 0.35))
 write("die.wav", lowpass(out, lambda t: 2500))
+
+# Condition Red siren: a sawtooth sweeping up 520 -> 780 Hz and back down
+L, ph, out = n(0.7), 0.0, []
+for i in range(L):
+    t = i / RATE
+    u = t / 0.35 if t < 0.35 else 2 - t / 0.35
+    ph += (520 + 260 * u) / RATE
+    out.append(saw(ph) * min(1, t / 0.02) * min(1, (0.7 - t) / 0.05))
+write("siren.wav", lowpass(out, lambda t: 1800), gain=0.7)

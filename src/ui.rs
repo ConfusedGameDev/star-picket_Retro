@@ -7,12 +7,12 @@ use agb::display::{
 };
 
 /// Must match GLYPHS in tools/make_gfx.py: the font image has one 8x8 cell per glyph, one row per ink.
-const GLYPHS: &str = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:!?/><#'()_";
+const GLYPHS: &str = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:!?/><#'()_+";
 pub const COLS: i32 = 30; // visible tiles across
 pub const ROWS: i32 = 20; // and down
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Ink { White = 0, Amber = 1, Dim = 2, Rose = 3 }
+pub enum Ink { White = 0, Amber = 1, Dim = 2, Rose = 3, Green = 4 }
 
 pub struct Text {
     bg: RegularBackground,
