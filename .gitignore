@@ -1,0 +1,4 @@
+target/
+*.gba
+!dist/star-picket.gba
+*.sav
