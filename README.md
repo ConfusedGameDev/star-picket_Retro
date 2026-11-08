@@ -25,8 +25,17 @@ with a flash cart.
   costs none of the GBA's 128 sprites; the playfield is darkened in hardware behind the pause and Game Over text.
 - A wrapping sector about 8.5 screens across, with two parallax star layers.
 - The player ship and bullets rotated by the GBA's hardware: 32 facings, one shared rotation matrix each.
-- Hex stations: shoot out all six cannon pods (200 each) or hit the core three times (1500 for the station).
-  Stations launch homing missiles when you are in range. Clear every station to start the next round.
+- Stations in five designs, each turned to a random angle by the hardware: Hex (6 pods), Lance (a long hull,
+  6 pods), Trident (three forked arms, 6 pods), Diamond (4 pods, fragile core, fires faster) and Crown (8 pods,
+  tougher core, fires missiles in pairs). Bigger designs join as the rounds go up. Shoot out all the cannon pods
+  (200 each) or hit the core (1500 for the station). Stations launch homing missiles when you are in range.
+  Clear every station to start the next round.
+- The spy ship: it circles you at a distance; shoot it for 200, then 400, then 800 in a row. After three long
+  looks it escapes and the sector goes to Condition Red.
+- Alert conditions, shown under the radar. Yellow while a base has noticed you, ships are near, a squadron is
+  out or the spy is about, and from 30 s on. Red if you linger (85 s, falling to 50 s in later rounds) or the spy
+  reports in: until the sector is cleared, fighters pour in from every direction, squadrons come three at a
+  time, a siren sounds and the space behind everything throbs dark red. The band follows the condition.
 - Enemy ships. Lone fighters arrive from off-screen and hunt you. Squadrons of five fly in a V from the nearest
   base ("BATTLE STATIONS"), in three types: I weaves at you, P swings in from your flank like a boomerang, E is a
   fast dart that barely turns. Kill the leader and the wingmen break off and flee; shoot down all five for a bonus
@@ -36,10 +45,9 @@ with a flash cart.
   type's colour, leaders larger).
 - The music system from the web version: a 124 BPM loop over Am · F · C · G, kill notes snapped to the next 16th
   and pitched from the current chord, kill streaks that climb the chord, and a fake dotted-eighth echo. The drums and
-  bass get busier while a station has you in range.
+  bass follow the alert condition: sparse in Green, busier in Yellow, four on the floor in Red.
 
-Not ported yet: the spy ship, Condition Yellow/Red, the five station designs, mines, voice callouts,
-and the art style toggle. The online leaderboard and share card can't come over: the GBA has no network, so the
+Not ported yet: mines, voice callouts, score pop-ups, and the art style toggle. The online leaderboard and share card can't come over: the GBA has no network, so the
 leaderboard is local.
 
 ## Building
@@ -57,6 +65,7 @@ agb-gbafix target/thumbv4t-none-eabi/release/star-picket-retro -o dist/star-pick
 `cargo build --release --features showcase` parks a station right in front of the start position and launches a
 squadron within a second, for testing.
 `cargo build --release --features quickover` gives you one ship that explodes 3 seconds in, for testing the menus.
+`cargo build --release --features gallery` freezes round 1 with one of each station design around you.
 `cargo build --release --features soundcheck` plays every pitched instrument at every note the game can use and
 logs the result to mGBA's log: run it after changing the sounds or the pitch maths.
 

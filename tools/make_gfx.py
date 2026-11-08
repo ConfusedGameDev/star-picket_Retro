@@ -5,6 +5,7 @@ The game imports these with agb's include_aseprite! / include_background_gfx! ma
 Run from the repo root after changing any art:  python3 tools/make_gfx.py
 Needs Pillow.
 """
+import math
 import random
 from pathlib import Path
 from PIL import Image, ImageDraw
@@ -81,31 +82,67 @@ save(load("Explosion.png"), "explosion.png")  # 8 frames of 32x32
 # Station parts. The pack has no space station, so the hull is drawn here in its steel blues;
 # pods are the pack's turret orb, the core is drawn in the game's amber.
 STEEL_DARK, STEEL, STEEL_LIGHT, FILL = (20, 40, 74), (61, 95, 146), (111, 147, 200), (14, 26, 48)
-hull = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-d = ImageDraw.Draw(hull)
-R = 24
-hexpts = [(32 + round(R * c), 32 + round(R * s)) for c, s in ((1, 0), (0.5, 0.866), (-0.5, 0.866), (-1, 0), (-0.5, -0.866), (0.5, -0.866))]
-d.polygon(hexpts, fill=FILL)
-d.line(hexpts + [hexpts[0]], fill=STEEL_DARK, width=5)
-d.line(hexpts + [hexpts[0]], fill=STEEL_LIGHT, width=1)
-for x, y in hexpts:  # spokes
-    d.line([(32 + (x - 32) * 0.45, 32 + (y - 32) * 0.45), (32 + (x - 32) * 0.72, 32 + (y - 32) * 0.72)], fill=STEEL, width=1)
-save(hull, "hull.png")
+# The five station designs. Pod positions (pixels from the centre, before the station's rotation)
+# must match DESIGNS in src/main.rs; the hull is the polygon through the pods.
+DESIGNS = [
+    ("hex", [(24, 0), (12, 21), (-12, 21), (-24, 0), (-12, -21), (12, -21)], "spokes"),
+    ("lance", [(-34, 0), (-17, -15), (17, -15), (34, 0), (17, 15), (-17, 15)], "spine"),
+    ("trident", [(-10, -30), (10, -30), (31, 6), (21, 24), (-21, 24), (-31, 6)], "arms"),
+    ("diamond", [(30, 0), (0, -20), (-30, 0), (0, 20)], "cross"),
+    ("crown", [(30, 12), (12, 30), (-12, 30), (-30, 12), (-30, -12), (-12, -30), (12, -30), (30, -12)], "ring"),
+]
+hulls = []
+for name, pods, deco in DESIGNS:
+    hull = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    d = ImageDraw.Draw(hull)
+    pts = [(32 + x, 32 + y) for x, y in pods]
+    d.polygon(pts, fill=FILL)
+    d.line(pts + [pts[0]], fill=STEEL_DARK, width=5)
+    d.line(pts + [pts[0]], fill=STEEL_LIGHT, width=1)
+
+    def seg(p, a, b, colour=STEEL):
+        x, y = p
+        d.line([(32 + x * a, 32 + y * a), (32 + x * b, 32 + y * b)], fill=colour, width=1)
+
+    if deco == "spokes":
+        for p in pods: seg(p, 0.45, 0.72)
+    elif deco == "cross":
+        for p in pods: seg(p, 0.42, 0.78)
+    elif deco == "spine":  # a keel from tip to tip, short ribs to the side pods
+        seg(pods[0], 0.32, 0.85); seg(pods[3], 0.32, 0.85)
+        for i, p in enumerate(pods):
+            if i % 3: seg(p, 0.62, 0.85)
+    elif deco == "arms":  # three struts out to the forks, and a bar across each fork
+        for i in range(0, len(pods), 2):
+            (ax, ay), (bx, by) = pods[i], pods[i + 1]
+            seg(((ax + bx) / 2, (ay + by) / 2), 0.38, 1.0)
+            d.line([(32 + ax, 32 + ay), (32 + bx, 32 + by)], fill=STEEL, width=1)
+    elif deco == "ring":
+        d.ellipse((32 - 19, 32 - 19, 32 + 19, 32 + 19), outline=STEEL)
+        for i, p in enumerate(pods):
+            if i % 2 == 0: seg(p, 0.38, 0.62)
+    hulls.append(hull)
+save(strip(hulls), "hulls.png")
 
 turret = load("Turrets.png").crop((23, 24, 39, 40))
 save(turret, "pod.png")
 
 AMBER, AMBER_DARK, CORE_FILL = (255, 200, 97), (184, 120, 40), (43, 15, 34)
-core = Image.new("RGBA", (32, 16), (0, 0, 0, 0))
-d = ImageDraw.Draw(core)
-for i, (fill, line) in enumerate(((CORE_FILL, AMBER), ((255, 255, 255), AMBER))):  # frame 0 normal, 1 hit flash
-    ox = i * 16
-    pts = [(ox + 8 + round(7 * c), 8 + round(7 * s)) for c, s in ((0.866, 0.5), (0, 1), (-0.866, 0.5), (-0.866, -0.5), (0, -1), (0.866, -0.5))]
-    d.polygon(pts, fill=fill, outline=line)
-    if i == 0:
-        d.ellipse((ox + 6, 6, ox + 10, 10), fill=AMBER_DARK)
-        d.point((ox + 8, 8), fill=AMBER)
-save(core, "core.png")
+# Cores, one shape per design (hexagon, triangle, square, octagon), each as normal + hit flash.
+# Frame = shape * 2 + (1 if flashing).
+SHAPES = [(6, 7, 1 / 12), (3, 8, 0.75), (4, 7, 1 / 8), (8, 7, 1 / 16)]  # (sides, radius, start angle in turns)
+cores = []
+for sides, r, a0 in SHAPES:
+    for fill in (CORE_FILL, (255, 255, 255)):
+        c = Image.new("RGBA", (16, 16), (0, 0, 0, 0))
+        d = ImageDraw.Draw(c)
+        pts = [(7.5 + r * math.cos(2 * math.pi * (a0 + k / sides)), 7.5 + r * math.sin(2 * math.pi * (a0 + k / sides))) for k in range(sides)]
+        d.polygon(pts, fill=fill, outline=AMBER)
+        if fill == CORE_FILL:
+            d.ellipse((6, 6, 9, 9), fill=AMBER_DARK)
+            d.point((7, 7), fill=AMBER)
+        cores.append(c)
+save(strip(cores), "cores.png")
 
 rocks = brighten(load("Asteroids_Foreground.png"))
 save(cell(rocks, 64 + 32, 32, 64), "rock_big.png")

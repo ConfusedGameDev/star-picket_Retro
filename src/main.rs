@@ -34,9 +34,9 @@ include_aseprite!(
     32x32 "gfx/explosion.png",
     "gfx/bolt.png",
     "gfx/missile.png",
-    "gfx/hull.png",
+    64x64 "gfx/hulls.png",
     "gfx/pod.png",
-    16x16 "gfx/core.png",
+    16x16 "gfx/cores.png",
     "gfx/rock_big.png",
     "gfx/rock_small.png",
     8x8 "gfx/digits.png",
@@ -57,7 +57,6 @@ const WS: i32 = 2048; // the sector wraps at this size, about 8.5 screens across
 const SW: i32 = 240;
 const SH: i32 = 160;
 const FACINGS: usize = 32; // ships snap to 32 directions, one shared rotation matrix each
-const POD_R: i32 = 24; // pods sit on the hull's corners
 
 // ---------- maths ----------
 fn wrap(v: N) -> N { v.rem_euclid(N::new(WS)) }
@@ -93,14 +92,49 @@ fn turn_toward(a: N, target: N, max: N) -> N {
     let d = ang_diff(a, target);
     (a + if d > max { max } else if d < -max { -max } else { d }).rem_euclid(N::new(1))
 }
-fn pod_off(k: usize) -> V { dir(N::new(k as i32) / 6) * POD_R }
 fn zero() -> V { vec2(N::new(0), N::new(0)) }
 
 // ---------- game state ----------
 struct Player { pos: V, a: N, v: N, inv: i32, alive: bool, dead_t: i32 }
 struct Bullet { pos: V, vel: V, life: i32, f: usize }
-/// `alerted` counts down while the base knows you're near (or just shot at it): that's Condition Yellow
-struct Station { pos: V, pods: [i8; 6], pod_flash: [u8; 6], core: i8, core_flash: u8, alive: bool, fire_t: i32, alerted: i32 }
+/// One of the five station designs. Pod positions are pixels from the centre before rotation, and
+/// must match DESIGNS in tools/make_gfx.py, which draws the hull through them.
+struct Design { pods: &'static [(i32, i32)], core: i8, core_frame: usize, fire_pct: i32, volley: usize }
+const HEX: usize = 0;
+const DESIGNS: [Design; 5] = [
+    // the original six-pod hexagon
+    Design { pods: &[(24, 0), (12, 21), (-12, 21), (-24, 0), (-12, -21), (12, -21)], core: 3, core_frame: 0, fire_pct: 100, volley: 1 },
+    // lance: a long hull, a cannon at each tip
+    Design { pods: &[(-34, 0), (-17, -15), (17, -15), (34, 0), (17, 15), (-17, 15)], core: 3, core_frame: 0, fire_pct: 100, volley: 1 },
+    // trident: three arms, each ending in a fork of two pods
+    Design { pods: &[(-10, -30), (10, -30), (31, 6), (21, 24), (-21, 24), (-31, 6)], core: 3, core_frame: 2, fire_pct: 100, volley: 1 },
+    // diamond: small, a fragile core, but it fires faster
+    Design { pods: &[(30, 0), (0, -20), (-30, 0), (0, 20)], core: 2, core_frame: 4, fire_pct: 70, volley: 1 },
+    // crown: eight pods, a tougher core, and it fires missiles in pairs
+    Design { pods: &[(30, 12), (12, 30), (-12, 30), (-30, 12), (-30, -12), (-12, -30), (12, -30), (30, -12)], core: 4, core_frame: 6, fire_pct: 115, volley: 2 },
+];
+/// which designs a round deals stations from; bigger ones join as the rounds go up
+fn station_pool(round: i32) -> &'static [usize] {
+    match round { 1 => &[0, 0, 3, 1], 2 => &[0, 3, 1, 2], 3 | 4 => &[0, 3, 1, 2, 2, 4], _ => &[0, 3, 1, 2, 4, 4] }
+}
+/// `alerted` counts down while the base knows you're near (or just shot at it): that's Condition Yellow.
+/// `offs` are the pod positions after the station's rotation; `facing` picks the shared rotation matrix.
+struct Station {
+    pos: V, design: usize, facing: usize, n: usize, offs: [V; 8], pods: [i8; 8], pod_flash: [u8; 8],
+    core: i8, core_flash: u8, alive: bool, fire_t: i32, alerted: i32,
+}
+impl Station {
+    fn new(pos: V, design: usize, facing: usize) -> Self {
+        let d = &DESIGNS[design];
+        let a = N::new(facing as i32) / FACINGS as i32;
+        let mut offs = [vec2(N::new(0), N::new(0)); 8];
+        let mut pods = [0; 8];
+        for (k, &p) in d.pods.iter().enumerate() { offs[k] = rotate(p, a); pods[k] = 2; }
+        Station { pos, design, facing, n: d.pods.len(), offs, pods, pod_flash: [0; 8], core: d.core, core_flash: 0, alive: true, fire_t: rnd(60, 180), alerted: 0 }
+    }
+    /// bounding radius: the furthest pod plus a little
+    fn reach(&self) -> i32 { if self.design == HEX { 34 } else { 44 } }
+}
 struct Missile { pos: V, a: N, life: i32 }
 struct Rock { pos: V, vel: V, big: bool }
 struct Boom { pos: V, t: i32 }
@@ -200,11 +234,25 @@ impl Game {
         self.cond = GREEN; self.cond_min = GREEN; self.round_t = 0;
         let n = (3 + self.round).min(10) as usize;
         let mut tries = 0;
+        let mut deck: Vec<usize> = Vec::new();
         while self.stations.len() < n && tries < 2000 {
             tries += 1;
             let pos = vec2(N::new(rnd(0, WS)), N::new(rnd(0, WS)));
             if near(pos, self.p.pos, 360) || self.stations.iter().any(|s| near(s.pos, pos, 400)) { continue; }
-            self.stations.push(Station { pos, pods: [2; 6], pod_flash: [0; 6], core: 3, core_flash: 0, alive: true, fire_t: rnd(60, 180), alerted: 0 });
+            // deal designs from a shuffled deck so a sector always mixes them
+            if deck.is_empty() {
+                deck.extend_from_slice(station_pool(self.round));
+                for i in (1..deck.len()).rev() { deck.swap(i, rnd(0, i as i32 + 1) as usize); }
+            }
+            let design = deck.pop().unwrap_or(HEX);
+            self.stations.push(Station::new(pos, design, rnd(0, FACINGS as i32) as usize));
+        }
+        // `--features gallery`: one of each station design around you, frozen, for screenshots
+        if cfg!(feature = "gallery") {
+            let spots = [(-78, -40, 0), (0, -44, 3), (78, -40, 7), (-46, 42, 12), (46, 42, 20)];
+            self.stations = spots.iter().enumerate().map(|(d, &(x, y, f))| Station::new(wrapv(self.p.pos + vec2(N::new(x), N::new(y))), d, f)).collect();
+            let pp = self.p.pos;
+            self.rocks.retain(|r| !near(r.pos, pp, 200));
         }
         // `cargo build --features showcase`: park the first station just ahead of you, for screenshots and testing
         if cfg!(feature = "showcase") && self.round == 1 {
@@ -239,9 +287,9 @@ impl Game {
         if !s.alive { return; }
         s.alive = false;
         let pos = s.pos;
-        for k in 0..6 {
+        for k in 0..s.n {
             if s.pods[k] > 0 { s.pods[k] = 0; }
-            self.booms.push(Boom { pos: wrapv(pos + pod_off(k)), t: -(k as i32) * 3 });
+            self.booms.push(Boom { pos: wrapv(pos + s.offs[k]), t: -(k as i32) * 3 });
         }
         self.booms.push(Boom { pos, t: 0 });
         self.score += 1500;
@@ -254,7 +302,7 @@ impl Game {
 
     fn update(&mut self, input: &ButtonController) {
         self.frame = self.frame.wrapping_add(1);
-        if self.over { return; }
+        if self.over || cfg!(feature = "gallery") { return; }
         // `--features quickover`: the only ship explodes 3 seconds in, for testing the menus
         if cfg!(feature = "quickover") && self.frame == 180 { self.p.inv = 0; self.kill_player(); }
         if let Some((_, t)) = &mut self.banner { *t -= 1; if *t <= 0 { self.banner = None; } }
@@ -320,18 +368,22 @@ impl Game {
                 s.alerted = s.alerted.max(120);
                 s.fire_t -= 1;
                 if s.fire_t <= 0 {
-                    s.fire_t = (102 - round * 5).max(42) + rnd(0, 48);
+                    let d = &DESIGNS[s.design];
+                    s.fire_t = ((102 - round * 5).max(42) + rnd(0, 48)) * d.fire_pct / 100;
                     let pp = self.p.pos;
-                    let best = (0..6).filter(|&k| s.pods[k] > 0).min_by_key(|&k| dist2(s.pos + pod_off(k), pp));
-                    if let Some(k) = best {
-                        let from = wrapv(s.pos + pod_off(k));
-                        self.miss.push(Missile { pos: from, a: ang_to(from, pp), life: 270 });
-                        self.events.push(Ev::Launch);
+                    // the pods nearest you fire: one missile for most designs, a pair from the crown
+                    let mut live: Vec<usize> = (0..s.n).filter(|&k| s.pods[k] > 0).collect();
+                    live.sort_by_key(|&k| dist2(s.pos + s.offs[k], pp));
+                    for (j, &k) in live.iter().take(d.volley).enumerate() {
+                        let from = wrapv(s.pos + s.offs[k]);
+                        let spread = if j > 0 { rndn(num!(-0.04), num!(0.04)) } else { num!(0) };
+                        self.miss.push(Missile { pos: from, a: (ang_to(from, pp) + spread).rem_euclid(N::new(1)), life: 270 });
                     }
+                    if !live.is_empty() { self.events.push(Ev::Launch); }
                 }
             }
-            if self.p.inv <= 0 && near(s.pos, self.p.pos, 40)
-                && (near(s.pos, self.p.pos, 15) || (0..6).any(|k| s.pods[k] > 0 && near(s.pos + pod_off(k), self.p.pos, 13))) {
+            if self.p.inv <= 0 && near(s.pos, self.p.pos, s.reach() + 6)
+                && (near(s.pos, self.p.pos, 15) || (0..s.n).any(|k| s.pods[k] > 0 && near(s.pos + s.offs[k], self.p.pos, 13))) {
                 crash = true;
             }
         }
@@ -378,12 +430,12 @@ impl Game {
     fn bullet_hits(&mut self, at: V) -> bool {
         for i in 0..self.stations.len() {
             let s = &mut self.stations[i];
-            if !s.alive || !near(s.pos, at, 34) { continue; }
-            for k in 0..6 {
-                if s.pods[k] > 0 && near(s.pos + pod_off(k), at, 8) {
+            if !s.alive || !near(s.pos, at, s.reach()) { continue; }
+            for k in 0..s.n {
+                if s.pods[k] > 0 && near(s.pos + s.offs[k], at, 8) {
                     s.pods[k] -= 1; s.pod_flash[k] = 5; s.alerted = 360;
                     if s.pods[k] == 0 {
-                        let pos = wrapv(s.pos + pod_off(k));
+                        let pos = wrapv(s.pos + s.offs[k]);
                         let all_gone = s.pods.iter().all(|&h| h == 0);
                         self.booms.push(Boom { pos, t: 0 });
                         self.score += 200;
@@ -770,19 +822,21 @@ fn draw_world(g: &Game, frame: &mut GraphicsFrame, matrices: &[AffineMatrixObjec
     }
     for st in g.stations.iter().filter(|s| s.alive) {
         let s = g.to_screen(st.pos);
-        if !on_screen(s, 40) { continue; }
-        for k in 0..6 {
+        if !on_screen(s, 48) { continue; }
+        for k in 0..st.n {
             if st.pods[k] == 0 || st.pod_flash[k] % 2 == 1 { continue; }
-            let off = pod_off(k);
+            let off = st.offs[k];
             let mut o = Object::new(sprites::POD.sprite(0));
             o.set_pos((s.0 + off.x.round() - 8, s.1 + off.y.round() - 8));
             world!(o);
         }
-        let mut o = Object::new(sprites::CORE.sprite(if st.core_flash > 0 { 1 } else { 0 }));
+        // the core and hull turn with the station, using the same matrices as the ships
+        let core = DESIGNS[st.design].core_frame + if st.core_flash > 0 { 1 } else { 0 };
+        let mut o = ObjectAffine::new(sprites::CORES.sprite(core), matrices[st.facing].clone(), AffineMode::Affine);
         o.set_pos((s.0 - 8, s.1 - 8));
         world!(o);
-        let mut o = Object::new(sprites::HULL.sprite(0));
-        o.set_pos((s.0 - 32, s.1 - 32));
+        let mut o = ObjectAffine::new(sprites::HULLS.sprite(st.design), matrices[st.facing].clone(), AffineMode::AffineDouble);
+        o.set_pos((s.0 - 64, s.1 - 64));
         world!(o);
     }
     for rk in &g.rocks {

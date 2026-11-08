@@ -10,6 +10,8 @@ showcase = []
 soundcheck = []
 # one ship that explodes 3 seconds in, to reach Game Over quickly when testing the menus
 quickover = []
+# one of each station design around you, frozen, for screenshots
+gallery = []
 
 [dependencies]
 agb = "0.25.0"
