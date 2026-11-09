@@ -1,0 +1,1419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Star Picket GBA Guide</title>
+<meta name="description" content="How Star Picket works on the Game Boy Advance, and a step-by-step guide to building it with Rust and agb.">
+<style>
+:root{
+  --bg:#0a0f1e; --panel:#111830; --panel2:#0d1328; --line:#24304f;
+  --ink:#e8e5f7; --dim:#9a95c4; --amber:#ffc861; --rose:#ff5d8f; --cyan:#62e3ff; --green:#8be0b4;
+  --code:#0d1226; --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:16px}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 var(--sans)}
+a{color:var(--cyan)} a:hover{color:var(--amber)}
+.layout{display:grid;grid-template-columns:280px minmax(0,1fr);max-width:1260px;margin:0 auto}
+nav.toc{position:sticky;top:0;height:100vh;overflow-y:auto;padding:28px 18px 40px;border-right:1px solid var(--line);font-size:14px}
+nav.toc .brand{font:700 13px/1.2 var(--mono);letter-spacing:.18em;color:var(--rose);text-transform:uppercase;margin-bottom:4px}
+nav.toc .title{font-weight:800;color:var(--amber);font-size:19px;line-height:1.2;margin-bottom:18px}
+nav.toc ol{list-style:none;margin:0;padding:0}
+nav.toc li{margin:2px 0}
+nav.toc a{display:block;color:var(--dim);text-decoration:none;padding:3px 8px;border-radius:5px}
+nav.toc a:hover{color:var(--ink);background:var(--panel)}
+nav.toc .part{margin:16px 0 4px;font:700 11px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--ink);opacity:.75}
+nav.toc ol ol a{padding-left:20px;font-size:13px}
+nav.toc summary{display:none}
+main{padding:40px 48px 120px;min-width:0}
+main > section{max-width:820px}
+h1{font-size:40px;line-height:1.1;margin:0 0 10px;color:var(--amber);letter-spacing:-.01em}
+h2{font-size:28px;line-height:1.2;margin:72px 0 6px;color:var(--amber);border-top:1px solid var(--line);padding-top:28px}
+h3{font-size:21px;line-height:1.3;margin:40px 0 8px;color:var(--ink)}
+h4{font-size:16px;margin:26px 0 6px;color:var(--rose);text-transform:uppercase;letter-spacing:.08em}
+.kicker{font:700 12px/1 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--rose);margin-top:72px}
+.kicker + h2{margin-top:6px;border-top:0;padding-top:0}
+.lede{font-size:19px;color:var(--ink);opacity:.92;max-width:720px}
+p,li{max-width:760px}
+code{font:14px/1.5 var(--mono);background:var(--code);border:1px solid var(--line);padding:1px 5px;border-radius:4px;color:#f3e6c4}
+pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;font:13.5px/1.55 var(--mono);color:#e9e6ff;margin:14px 0 20px;max-width:900px}
+pre code{background:none;border:0;padding:0;font:inherit;color:inherit}
+pre .c{color:#7d86b8}
+pre[data-file]::before{content:attr(data-file);display:block;font:700 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin:-2px 0 10px}
+table{border-collapse:collapse;margin:14px 0 22px;font-size:14.5px;max-width:860px;width:100%}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:var(--panel);color:var(--amber);font-weight:700}
+td code{font-size:13px}
+.note,.warn,.why{border-left:3px solid var(--cyan);background:var(--panel2);padding:12px 16px;border-radius:0 8px 8px 0;margin:18px 0;max-width:780px}
+.warn{border-color:var(--rose)} .why{border-color:var(--amber)}
+.note b:first-child,.warn b:first-child,.why b:first-child{display:block;font:700 11px/1.4 var(--mono);letter-spacing:.16em;text-transform:uppercase;margin-bottom:4px}
+.note b:first-child{color:var(--cyan)} .warn b:first-child{color:var(--rose)} .why b:first-child{color:var(--amber)}
+figure{margin:18px 0 26px}
+figure img{display:block;max-width:100%;image-rendering:pixelated;border:1px solid var(--line);border-radius:6px;background:#000}
+figcaption{font-size:14px;color:var(--dim);margin-top:8px;max-width:720px}
+.shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin:18px 0 26px;max-width:900px}
+.shots figure{margin:0}
+.diagram{max-width:860px;margin:18px 0 26px}
+.diagram svg{width:100%;height:auto;display:block}
+.diagram text{font-family:var(--mono)}
+.milestone{display:inline-block;font:700 12px/1 var(--mono);color:var(--bg);background:var(--amber);border-radius:4px;padding:5px 8px;margin-right:8px;vertical-align:middle;letter-spacing:.08em}
+.files{font:13px/1.5 var(--mono);color:var(--dim)}
+.steps{counter-reset:s;list-style:none;padding:0}
+.steps > li{counter-increment:s;position:relative;padding-left:42px;margin:14px 0}
+.steps > li::before{content:counter(s);position:absolute;left:0;top:0;width:28px;height:28px;border-radius:50%;background:var(--panel);border:1px solid var(--line);color:var(--amber);font:700 13px/28px var(--mono);text-align:center}
+kbd{font:12px/1 var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:2px 6px;background:var(--panel)}
+.hero{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:28px;align-items:center;max-width:960px}
+.hero img{width:100%;image-rendering:pixelated;border:1px solid var(--line);border-radius:8px}
+@media (max-width:980px){
+  .layout{display:block}
+  nav.toc{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line);padding:20px 16px}
+  nav.toc summary{display:list-item;cursor:pointer;color:var(--cyan);font-weight:700;padding:4px 0}
+  nav.toc .title{margin-bottom:8px}
+  main{padding:24px 16px 80px}
+  h1{font-size:32px}
+  .hero{grid-template-columns:1fr}
+  table{display:block;overflow-x:auto}
+  td code{overflow-wrap:anywhere}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="toc" aria-label="Contents">
+  <div class="brand">Build guide</div>
+  <div class="title">Star Picket on the Game Boy Advance</div>
+  <details id="toc" open><summary>Contents</summary>
+  <ol>
+    <li><a href="#start">Read me first</a></li>
+    <li class="part">Part 1 · The machine</li>
+    <li><a href="#gba">What is a Game Boy Advance?</a></li>
+    <li><a href="#hardware">The hardware, piece by piece</a>
+      <ol>
+        <li><a href="#cpu">CPU</a></li>
+        <li><a href="#memory">Memory map</a></li>
+        <li><a href="#display">Display and the frame</a></li>
+        <li><a href="#graphics">Tiles, backgrounds, sprites</a></li>
+        <li><a href="#sound">Sound</a></li>
+        <li><a href="#rest">Input, timers, DMA, saves</a></li>
+      </ol></li>
+    <li><a href="#constraints">What that means for a game</a></li>
+    <li class="part">Part 2 · The toolkit</li>
+    <li><a href="#options">Ways to make a GBA game</a></li>
+    <li><a href="#agb">What agb gives you</a></li>
+    <li><a href="#why">Why we chose agb</a></li>
+    <li><a href="#setup">Setting up the toolchain</a></li>
+    <li class="part">Part 3 · The basics</li>
+    <li><a href="#lesson1">1 · Hello, world</a></li>
+    <li><a href="#lesson2">2 · Display a sprite</a></li>
+    <li><a href="#lesson3">3 · Read input</a></li>
+    <li><a href="#lesson4">4 · Make a sound</a></li>
+    <li><a href="#fixed">Interlude: numbers without floats</a></li>
+    <li class="part">Part 4 · Building Star Picket</li>
+    <li><a href="#m1">M1 · Project and art pipeline</a></li>
+    <li><a href="#m2">M2 · A world that wraps</a></li>
+    <li><a href="#m3">M3 · Flying and shooting</a></li>
+    <li><a href="#m4">M4 · The starfield</a></li>
+    <li><a href="#m5">M5 · Stations and collisions</a></li>
+    <li><a href="#m6">M6 · Missiles, rocks, lives</a></li>
+    <li><a href="#m7">M7 · HUD and radar</a></li>
+    <li><a href="#m8">M8 · Music your kills play</a></li>
+    <li><a href="#m9">M9 · Text, menus, screens</a></li>
+    <li><a href="#m10">M10 · Saving the leaderboard</a></li>
+    <li><a href="#m11">M11 · Fighters and squadrons</a></li>
+    <li><a href="#m12">M12 · Spy ship and conditions</a></li>
+    <li><a href="#m13">M13 · Five station designs</a></li>
+    <li class="part">Part 5 · Shipping it</li>
+    <li><a href="#testing">Testing and debugging</a></li>
+    <li><a href="#next">Where to go next</a></li>
+    <li><a href="#refs">References</a></li>
+  </ol>
+  </details>
+</nav>
+<script>
+  // on a phone the contents start folded, so the guide itself comes first
+  if (window.matchMedia("(max-width: 980px)").matches) document.getElementById("toc").removeAttribute("open");
+</script>
+
+<main>
+<section id="start">
+<div class="hero">
+  <div>
+    <div class="kicker" style="margin-top:0">A build guide</div>
+    <h1>Star Picket on the Game Boy Advance</h1>
+    <p class="lede">How the GBA version of Star Picket works, and how to build it yourself: from a blank Rust
+    project to a sector-patrol shooter with rotating sprites, a saved leaderboard and music your kills play.</p>
+  </div>
+  <img src="img/title.png" alt="Star Picket title screen on the GBA: the logo, LAUNCH, TOP PILOTS and CREDITS">
+</div>
+
+<p>Star Picket started as a browser game. This port runs on a machine from 2001 with a 16&nbsp;MHz processor, no
+floating-point unit and 288&nbsp;KB of working RAM. Almost every feature had to be rethought for that hardware, and
+that's what makes it a good teaching project: each milestone exercises one part of the console.</p>
+
+<h3>How to read this guide</h3>
+<ul>
+  <li><b>Part 1</b> explains the console: what each piece of hardware does and what it can't do.</li>
+  <li><b>Part 2</b> covers the toolkit we used, <a href="https://crates.io/crates/agb">agb</a> (a Rust library),
+  why we picked it, and how to install it.</li>
+  <li><b>Part 3</b> is four short lessons: text, a sprite, input, sound. Each is a complete program in
+  <code>examples/</code> that you can build and run.</li>
+  <li><b>Part 4</b> builds the game milestone by milestone. Code is quoted from <code>src/</code>, sometimes
+  trimmed; the files themselves are the reference.</li>
+  <li><b>Part 5</b> is about testing on a machine with no debugger attached.</li>
+</ul>
+
+<h3>The repository at a glance</h3>
+<pre data-file="star-picket_retro/"><code>src/main.rs        the game: world, player, enemies, stations, screens, main loop
+src/sound.rs       the music system and sound effects
+src/ui.rs          text on a background layer
+src/scores.rs      the saved leaderboard
+examples/          the four Part 3 lessons
+assets/lunar/      the Lunar Battle Pack sprites (CC0), as downloaded
+tools/make_gfx.py  cuts the pack into GBA-sized sheets in gfx/, draws the font, logo and stations
+tools/make_sfx.py  synthesizes the instrument samples in sfx/
+gfx/  sfx/         generated art and sound, imported at compile time
+dist/              a ready-to-play ROM
+docs/              this guide</code></pre>
+
+<div class="note"><b>Note</b>The game runs on real hardware with a flash cart and in any GBA emulator. All screenshots in
+this guide come from <a href="https://mgba.io">mGBA</a>, shown at 3&times; scale.</div>
+</section>
+
+<!-- ============================== PART 1 ============================== -->
+<div class="kicker" id="gba">Part 1 · The machine</div>
+<h2>What is a Game Boy Advance?</h2>
+<section>
+<p>The Game Boy Advance (GBA) is Nintendo's handheld from 2001, the successor to the Game Boy Color. It launched in
+Japan in March 2001 and sold about 81.5 million units across its three models: the original horizontal GBA, the
+clamshell GBA SP (2003), which added a lit screen and a rechargeable battery, and the small Game Boy Micro (2005).</p>
+<p>It's often described as "a portable Super Nintendo", and that's a fair way to think about it. Like the SNES, it
+draws graphics with dedicated hardware that composes tiled background layers and sprites as the screen is scanned
+out, rather than drawing every pixel in software. Unlike the SNES, it has a modern-feeling 32-bit RISC processor that
+you can program in C, C++ or Rust.</p>
+<p>That split is the key to programming it: <b>the CPU decides what should be on screen, and the video hardware puts it
+there</b>. Your game spends each frame updating positions and tables in video memory; the picture itself costs the CPU
+nothing.</p>
+</section>
+
+<h2 id="hardware">The hardware, piece by piece</h2>
+<section>
+<h3 id="cpu">The CPU</h3>
+<table>
+<tr><th>Part</th><th>Detail</th><th>What it means for us</th></tr>
+<tr><td>Processor</td><td>ARM7TDMI at 16.78&nbsp;MHz (2<sup>24</sup>&nbsp;Hz)</td><td>About 280,000 cycles per frame at 60&nbsp;fps. Plenty for a 2D action game if you're careful.</td></tr>
+<tr><td>Instruction sets</td><td>32-bit ARM and 16-bit Thumb</td><td>Code runs from the cartridge over a 16-bit bus, so compact Thumb code is the default. Rust's target is <code>thumbv4t-none-eabi</code>.</td></tr>
+<tr><td>Maths</td><td>Integer only: no floating-point unit, no hardware divide</td><td>All positions and angles use fixed-point numbers. Division is a slow software routine, so hot code avoids it.</td></tr>
+<tr><td>Second CPU</td><td>An 8-bit Game Boy processor</td><td>Only used to run old Game Boy cartridges; GBA games can't use it.</td></tr>
+</table>
+
+<h3 id="memory">The memory map</h3>
+<p>Everything on the GBA is a memory address: RAM, the video chip's settings, the cartridge. Writing to
+<code>0x0400_0000</code> changes the display mode; writing to <code>0x0700_0000</code> moves a sprite. The regions
+differ a lot in size and speed:</p>
+<div class="diagram" role="img" aria-label="GBA memory map: BIOS, EWRAM, IWRAM, IO, palette, VRAM, OAM, cartridge ROM and save memory, with sizes">
+<svg viewBox="0 0 860 300" xmlns="http://www.w3.org/2000/svg">
+  <g font-size="13">
+    <rect x="10" y="10" width="840" height="280" rx="10" fill="#0d1328" stroke="#24304f"/>
+    <g fill="#e8e5f7">
+      <text x="30" y="40" fill="#9a95c4" font-size="11" letter-spacing="2">ADDRESS</text>
+      <text x="170" y="40" fill="#9a95c4" font-size="11" letter-spacing="2">REGION</text>
+      <text x="420" y="40" fill="#9a95c4" font-size="11" letter-spacing="2">SIZE</text>
+      <text x="520" y="40" fill="#9a95c4" font-size="11" letter-spacing="2">USED FOR IN STAR PICKET</text>
+    </g>
+    <g>
+      <rect x="160" y="52" width="240" height="22" rx="4" fill="#24304f"/><text x="30" y="68" fill="#9a95c4">0x0000_0000</text><text x="170" y="68" fill="#e8e5f7">BIOS (read-only)</text><text x="420" y="68" fill="#e8e5f7">16 KB</text><text x="520" y="68" fill="#9a95c4">startup, maths routines</text>
+      <rect x="160" y="78" width="240" height="22" rx="4" fill="#3a2a5a"/><text x="30" y="94" fill="#9a95c4">0x0200_0000</text><text x="170" y="94" fill="#e8e5f7">EWRAM, slower</text><text x="420" y="94" fill="#e8e5f7">256 KB</text><text x="520" y="94" fill="#9a95c4">the heap: Vec of ships, bullets</text>
+      <rect x="160" y="104" width="240" height="22" rx="4" fill="#5a3a7a"/><text x="30" y="120" fill="#9a95c4">0x0300_0000</text><text x="170" y="120" fill="#e8e5f7">IWRAM, fast</text><text x="420" y="120" fill="#e8e5f7">32 KB</text><text x="520" y="120" fill="#9a95c4">the stack, the sound mixer</text>
+      <rect x="160" y="130" width="240" height="22" rx="4" fill="#24304f"/><text x="30" y="146" fill="#9a95c4">0x0400_0000</text><text x="170" y="146" fill="#e8e5f7">I/O registers</text><text x="420" y="146" fill="#e8e5f7">1 KB</text><text x="520" y="146" fill="#9a95c4">display, sound, buttons, timers</text>
+      <rect x="160" y="156" width="240" height="22" rx="4" fill="#7a4a2a"/><text x="30" y="172" fill="#9a95c4">0x0500_0000</text><text x="170" y="172" fill="#e8e5f7">Palette RAM</text><text x="420" y="172" fill="#e8e5f7">1 KB</text><text x="520" y="172" fill="#9a95c4">512 colours: 256 BG + 256 sprite</text>
+      <rect x="160" y="182" width="240" height="22" rx="4" fill="#a8722a"/><text x="30" y="198" fill="#9a95c4">0x0600_0000</text><text x="170" y="198" fill="#0a0f1e">VRAM</text><text x="420" y="198" fill="#e8e5f7">96 KB</text><text x="520" y="198" fill="#9a95c4">tiles and maps: stars, text, sprites</text>
+      <rect x="160" y="208" width="240" height="22" rx="4" fill="#7a4a2a"/><text x="30" y="224" fill="#9a95c4">0x0700_0000</text><text x="170" y="224" fill="#e8e5f7">OAM (object attributes)</text><text x="420" y="224" fill="#e8e5f7">1 KB</text><text x="520" y="224" fill="#9a95c4">128 sprites, 32 rotation matrices</text>
+      <rect x="160" y="234" width="240" height="22" rx="4" fill="#2a5a4a"/><text x="30" y="250" fill="#9a95c4">0x0800_0000</text><text x="170" y="250" fill="#e8e5f7">Cartridge ROM</text><text x="420" y="250" fill="#e8e5f7">up to 32 MB</text><text x="520" y="250" fill="#9a95c4">code, art, samples (~370 KB)</text>
+      <rect x="160" y="260" width="240" height="22" rx="4" fill="#2a4a5a"/><text x="30" y="276" fill="#9a95c4">0x0E00_0000</text><text x="170" y="276" fill="#e8e5f7">Cartridge save (SRAM)</text><text x="420" y="276" fill="#e8e5f7">32–64 KB</text><text x="520" y="276" fill="#9a95c4">the Top Pilots table</text>
+    </g>
+  </g>
+</svg>
+</div>
+<p>Two things stand out. Working memory is small: 288&nbsp;KB in total, of which only 32&nbsp;KB is fast. And the
+cartridge is huge by comparison and directly readable, so art and sound stay in ROM and are copied into video memory
+only when they're needed.</p>
+
+<h3 id="display">The display and the frame</h3>
+<p>The screen is 240&times;160 pixels with 15-bit colour (32,768 colours, five bits each for red, green and blue).
+The video hardware draws it one line at a time, top to bottom, about 59.73 times a second:</p>
+<div class="diagram" role="img" aria-label="One frame: 160 visible lines of VDraw followed by 68 lines of VBlank">
+<svg viewBox="0 0 860 170" xmlns="http://www.w3.org/2000/svg">
+  <rect x="10" y="10" width="840" height="150" rx="10" fill="#0d1328" stroke="#24304f"/>
+  <rect x="40" y="50" width="560" height="44" rx="6" fill="#24304f"/>
+  <rect x="600" y="50" width="220" height="44" rx="6" fill="#a8722a"/>
+  <text x="56" y="77" fill="#e8e5f7" font-size="14">VDraw: lines 0–159 are drawn to the screen</text>
+  <text x="614" y="77" fill="#0a0f1e" font-size="14" font-weight="700">VBlank: lines 160–227</text>
+  <text x="40" y="40" fill="#9a95c4" font-size="12">one frame = 228 lines × 1,232 cycles = 280,896 cycles ≈ 16.7 ms</text>
+  <text x="40" y="120" fill="#9a95c4" font-size="12">game logic runs here, while the picture is drawn …</text>
+  <text x="600" y="120" fill="#ffc861" font-size="12">… and video memory is updated here,</text>
+  <text x="600" y="138" fill="#ffc861" font-size="12">so nothing changes mid-picture</text>
+</svg>
+</div>
+<p>The 68 lines after the visible picture are the <b>vertical blank</b> (VBlank). It's the safe time to change
+sprite positions and palettes: change them while the screen is being drawn, and the top half of the screen shows the
+old frame while the bottom shows the new one ("tearing"). Every GBA game is built around this rhythm: update the
+game, wait for VBlank, copy the new state to the video hardware, repeat.</p>
+
+<h3 id="graphics">Tiles, backgrounds and sprites</h3>
+<p>The GBA has three bitmap modes (where VRAM is a framebuffer you draw pixels into) and three tile modes. Bitmap
+modes are slow for anything that moves, so nearly all games, including this one, use <b>tile mode 0</b>.</p>
+<h4>Tiles and palettes</h4>
+<p>Graphics are built from <b>8&times;8-pixel tiles</b>. In 16-colour mode (4 bits per pixel), each tile picks one
+of 16 palettes of 16 colours; colour 0 of every palette is transparent. That's why our art pipeline has to make sure
+no sprite uses more than 15 colours. A 256-colour mode exists too, at twice the memory per tile.</p>
+<h4>Backgrounds</h4>
+<p>Mode 0 gives you up to <b>four background layers</b>. Each is a map of tile numbers, up to 64&times;64 tiles
+(512&times;512 pixels), that the hardware scrolls by any amount and wraps around at the edges for free. Star Picket
+uses three: two starfield layers scrolled at different speeds for parallax, and one for all text.</p>
+<h4>Sprites ("objects")</h4>
+<p>Anything that moves freely is a sprite. The hardware supports <b>128 sprites</b>, each from 8&times;8 up to
+64&times;64 pixels, stored as attributes in OAM: position, size, which tiles, which palette, priority, flips.</p>
+<p>The feature this game leans on hardest is <b>affine sprites</b>: a sprite can be rotated and scaled in hardware by
+one of <b>32 transformation matrices</b>, shared by all sprites. A "double-size" flag doubles the area the sprite may
+draw into, so corners aren't clipped while it turns.</p>
+<p>There's also a time limit: the hardware has about 1,210 cycles per scanline for sprites. A normal sprite costs its
+width in cycles; an affine one costs about twice its width plus 10. Too many large rotating sprites on the same line
+and some of them flicker or vanish.</p>
+<h4>Priorities and effects</h4>
+<p>Each background and each sprite has a priority from 0 (front) to 3 (back). Sprites draw in front of backgrounds of
+the same priority. The display can also blend layers (transparency) or fade chosen layers towards black or white,
+which we use to darken the playfield behind the pause menu.</p>
+
+<h3 id="sound">Sound</h3>
+<p>The GBA has two kinds of sound hardware:</p>
+<ul>
+  <li><b>Four "legacy" channels</b> from the Game Boy: two square waves, a short programmable waveform and a noise
+  generator. They're cheap to drive and give the classic chiptune sound.</li>
+  <li><b>Two Direct Sound channels</b> that play 8-bit samples. They have no mixer: to play eight sounds at once,
+  the game must add them together in software and feed the result to the hardware, using a timer and DMA.</li>
+</ul>
+<p>Star Picket uses Direct Sound with agb's software mixer, which plays up to 8 samples at once, each at its own speed
+and volume. Playing a sample faster raises its pitch, and that's the basis of the music system in
+<a href="#m8">M8</a>.</p>
+
+<h3 id="rest">Input, timers, DMA and saves</h3>
+<ul>
+  <li><b>Input</b>: a D-pad and six buttons (A, B, L, R, Start, Select), read from one register. There's no
+  "button pressed" event: you read the state every frame and compare it with the last frame.</li>
+  <li><b>Timers</b>: four counters, used for audio timing and measuring time.</li>
+  <li><b>DMA</b>: four channels that copy memory without the CPU, used to stream audio and move graphics fast.</li>
+  <li><b>Interrupts</b>: the hardware can call your code at VBlank, at each line, when a timer fires, and so on.</li>
+  <li><b>Saves</b>: the cartridge carries its own save chip. Common types are battery-backed SRAM (32&nbsp;KB, simple
+  and fast), Flash (64 or 128&nbsp;KB) and EEPROM (512 bytes or 8&nbsp;KB). Emulators detect the type from a marker
+  string in the ROM.</li>
+</ul>
+</section>
+
+<h2 id="constraints">What that means for a game</h2>
+<section>
+<p>Before writing any code, these limits shaped every design decision in the port:</p>
+<table>
+<tr><th>Limit</th><th>Consequence in Star Picket</th></tr>
+<tr><td>240&times;160 screen</td><td>You see far less of the sector than in a browser. The world shrank to about 8.5 screens across, the radar matters more, and enemy speeds had to be retuned so they're on screen at all (<a href="#m11">M11</a>).</td></tr>
+<tr><td>No floating point</td><td>Every position, speed and angle is a fixed-point number (<a href="#fixed">interlude</a>).</td></tr>
+<tr><td>128 sprites</td><td>Text goes on a background layer instead of sprites; the renderer counts sprites and stops at a budget.</td></tr>
+<tr><td>32 rotation matrices</td><td>Ships turn in 32 fixed steps, one shared matrix per step, so any number of ships can rotate.</td></tr>
+<tr><td>16-colour palettes</td><td>Each sprite gets at most 15 colours plus transparency; the art script checks this.</td></tr>
+<tr><td>No vector drawing</td><td>The web version's neon "vector" style can't come over. The port is pixel art only.</td></tr>
+<tr><td>No hardware mixer</td><td>Music and effects share 8 software-mixed channels; the music engine has to manage them.</td></tr>
+<tr><td>No network</td><td>The online leaderboard became a local top ten saved on the cartridge.</td></tr>
+</table>
+</section>
+
+<!-- ============================== PART 2 ============================== -->
+<div class="kicker" id="options">Part 2 · The toolkit</div>
+<h2>Ways to make a GBA game today</h2>
+<section>
+<p>You can't run a normal operating system program on a GBA: a game is a raw cartridge image (a ROM) that the
+console jumps into at power-on. Homebrew developers build those with a cross-compiler and a library that wraps the
+hardware. The main options:</p>
+<table>
+<tr><th>Toolkit</th><th>Language</th><th>Character</th></tr>
+<tr><td><b>devkitARM + libtonc / libgba</b></td><td>C</td><td>The long-standing standard. Close to the metal: you write registers yourself, guided by the excellent <a href="https://gbadev.net/tonc/">Tonc</a> tutorial.</td></tr>
+<tr><td><b>Butano</b></td><td>C++</td><td>A full engine on top of devkitARM: sprite and background managers, asset import, audio, lots of examples. Very productive.</td></tr>
+<tr><td><b>agb</b></td><td>Rust</td><td>A Rust library with managed sprites and backgrounds, compile-time asset import, a software audio mixer and save support. Uses Rust's own toolchain, no devkitARM.</td></tr>
+</table>
+</section>
+
+<h2 id="agb">What agb gives you</h2>
+<section>
+<p><a href="https://crates.io/crates/agb">agb</a> ("a Game Boy Advance library") is a Rust crate. This guide uses
+version 0.25. These are the parts Star Picket relies on:</p>
+<table>
+<tr><th>Feature</th><th>agb API</th><th>Used for</th></tr>
+<tr><td>Entry point and setup</td><td><code>#[agb::entry]</code>, <code>agb::Gba</code></td><td>Boots the console and hands you its subsystems.</td></tr>
+<tr><td>A frame-by-frame display</td><td><code>gfx.frame()</code> … <code>frame.commit()</code></td><td>Each frame you "show" sprites and backgrounds; commit waits for VBlank and applies it all.</td></tr>
+<tr><td>Sprites</td><td><code>Object</code>, <code>ObjectAffine</code>, <code>AffineMatrixObject</code></td><td>Ships, bullets, stations; VRAM for sprite tiles is allocated and shared for you.</td></tr>
+<tr><td>Art import</td><td><code>include_aseprite!</code>, <code>include_background_gfx!</code></td><td>Converts PNG files to tiles and palettes at compile time. Bad art fails the build, not the game.</td></tr>
+<tr><td>Backgrounds</td><td><code>RegularBackground</code></td><td>The starfield layers and the text layer.</td></tr>
+<tr><td>Sprites drawn at runtime</td><td><code>DynamicSprite16</code></td><td>The radar, redrawn pixel by pixel.</td></tr>
+<tr><td>Input</td><td><code>ButtonController</code></td><td>Held and "just pressed" buttons, D-pad as −1/0/+1.</td></tr>
+<tr><td>Fixed-point maths</td><td><code>agb::fixnum::Num</code>, <code>Vector2D</code></td><td>Positions, speeds, angles, sine and cosine.</td></tr>
+<tr><td>Audio</td><td><code>Mixer</code>, <code>SoundChannel</code>, <code>include_wav!</code></td><td>8-channel software mixer with per-channel speed and volume.</td></tr>
+<tr><td>Saves</td><td><code>gba.save.init_sram(…)</code></td><td>Crash-safe save slots, data stored with <code>serde</code>.</td></tr>
+<tr><td>Effects</td><td><code>frame.blend()</code></td><td>Darkening the game behind the pause menu.</td></tr>
+<tr><td>Debugging</td><td><code>agb::println!</code>, crash screen</td><td>Logging to the emulator; a panic shows a QR code and a stack trace code.</td></tr>
+</table>
+</section>
+
+<h2 id="why">Why we chose agb</h2>
+<section>
+<p>The first plan was Butano, which is excellent. We switched to agb for a mix of practical and technical reasons:</p>
+<ul>
+  <li><b>It installs with Rust's own tools.</b> Butano and libtonc need devkitARM, which is downloaded from devkitPro's
+  servers. The cloud machine this port was built on couldn't reach them; agb needs only <code>rustup</code> and
+  crates.io. Even on your own computer, "install Rust, run cargo" is a short setup.</li>
+  <li><b>Assets are checked at compile time.</b> A sprite with too many colours, or a WAV at the wrong sample rate, is
+  a build error with a clear message, not a garbled screen.</li>
+  <li><b>The hard parts are already done:</b> the audio mixer, VRAM allocation for sprites and tiles, the save system,
+  and a readable crash screen.</li>
+  <li><b>Rust catches mistakes early.</b> Out-of-bounds indexing panics with a message instead of silently corrupting
+  memory, which on a console with no debugger is the difference between an hour and a day.</li>
+</ul>
+<div class="why"><b>Trade-offs</b>agb needs Rust's <i>nightly</i> compiler, which changes daily. During this project a
+new nightly broke one of agb's dependencies, so the project pins the nightly from around agb's release (see
+<a href="#setup">setup</a>). We also hit two bugs in agb's mixer that can crash the game (<a href="#m8">M8</a>). Both
+are manageable, but they're the price of a younger toolkit.</div>
+</section>
+
+<h2 id="setup">Setting up the toolchain</h2>
+<section>
+<ol class="steps">
+<li><b>Install Rust</b> with <a href="https://rustup.rs">rustup</a>. You don't need to pick a version: the project
+pins its own.</li>
+<li><b>Install the ROM packer</b>, which turns the compiled program into a cartridge image with a valid header:
+<pre><code>cargo install agb-gbafix</code></pre></li>
+<li><b>Install an emulator.</b> <a href="https://mgba.io">mGBA</a> is accurate and shows agb's log output
+(Tools → View Logs). On a phone, Delta (iOS) and most Android GBA emulators work too.</li>
+<li><b>Build and pack:</b>
+<pre><code>cargo build --release
+agb-gbafix target/thumbv4t-none-eabi/release/star-picket-retro -o dist/star-picket.gba</code></pre>
+The first build compiles Rust's core library for the GBA and takes a minute or two.</li>
+</ol>
+<p>Three small files make this work. They're the same in any agb project:</p>
+<pre data-file="rust-toolchain.toml">[toolchain]
+channel = "nightly-2026-07-20"   <span class="c"># pinned: a newer nightly broke a dependency</span>
+components = ["rust-src"]        <span class="c"># the core library's source, compiled for the GBA</span></pre>
+<pre data-file=".cargo/config.toml">[unstable]
+build-std = ["core", "alloc"]                     <span class="c"># no std on a console: just core and the allocator</span>
+build-std-features = ["compiler-builtins-mem"]
+
+[build]
+target = "thumbv4t-none-eabi"                     <span class="c"># Thumb code for the ARM7TDMI, no operating system</span>
+
+[target.thumbv4t-none-eabi]
+rustflags = ["-Clink-arg=-Tgba.ld", "-Ctarget-cpu=arm7tdmi"]   <span class="c"># agb's linker script lays out the ROM</span>
+runner = "mgba-qt"                                <span class="c"># so `cargo run` opens the emulator</span></pre>
+<pre data-file="Cargo.toml (excerpt)">[dependencies]
+agb = "0.25.0"
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }   <span class="c"># for saves</span>
+
+[profile.release]
+opt-level = 3
+lto = "fat"          <span class="c"># whole-program optimisation: smaller, faster ROM</span>
+debug = true         <span class="c"># keeps symbols so crash codes can be decoded (they're not in the .gba)</span>
+panic = "abort"</pre>
+<div class="note"><b>Why <code>build-std</code>?</b>Rust ships its standard library pre-compiled for common
+platforms, not for the GBA. <code>build-std</code> compiles <code>core</code> (the language basics) and
+<code>alloc</code> (<code>Vec</code>, <code>Box</code>) for our target. There's no <code>std</code>: no files, no
+threads, no operating system. That's why every program starts with <code>#![no_std]</code>.</div>
+</section>
+
+<!-- ============================== PART 3 ============================== -->
+<div class="kicker" id="lesson1">Part 3 · The basics</div>
+<h2>Lesson 1 · Hello, world</h2>
+<section>
+<p>Four short programs teach the pieces the game is built from. Each one is a complete file in
+<code>examples/</code>. Build and pack one like this:</p>
+<pre><code>cargo build --release --example 01_hello
+agb-gbafix target/thumbv4t-none-eabi/release/examples/01_hello -o hello.gba</code></pre>
+<p>A GBA has no console to print to, so "hello world" means two things: a line in the emulator's log, and
+text on the actual screen. Text on screen is a background layer whose tiles are letters.</p>
+<figure><img src="img/lesson1-hello.png" alt="HELLO WORLD! in white on a dark blue screen" width="480">
+<figcaption>Lesson 1 running in mGBA.</figcaption></figure>
+<pre data-file="examples/01_hello.rs"><code>//! Lesson 1: hello, world. Puts text on a background layer and prints to the emulator's log.
+//!
+//!     cargo build --release --example 01_hello
+#![no_std]
+#![no_main]
+
+use agb::{
+    display::{Priority, tiled::{RegularBackground, RegularBackgroundSize, TileFormat, TileSetting}},
+    include_background_gfx,
+};
+
+// The font is an image with one 8x8 tile per character. The macro converts it at compile time
+// into tile data plus the palettes it needs. "001020" is the colour shown where nothing is drawn.
+include_background_gfx!(mod gfx, "001020", FONT =&gt; "gfx/font.png");
+const GLYPHS: &amp;str = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:!?/&gt;&lt;#'()_+";
+
+#[agb::entry]
+fn main(mut gba: agb::Gba) -&gt; ! {
+    agb::println!("Hello from the Game Boy Advance!"); // shows up in mGBA's log window
+
+    let mut gfx = gba.graphics.get();
+    gfx.set_background_palettes(gfx::PALETTES);
+    let mut bg = RegularBackground::new(Priority::P0, RegularBackgroundSize::Background32x32, TileFormat::FourBpp);
+
+    // Each character is one tile: find its index in the font and place that tile on the map.
+    let text = "HELLO WORLD!";
+    for (i, c) in text.chars().enumerate() {
+        let glyph = GLYPHS.find(c).unwrap_or(0);
+        let tile = if glyph == 0 { TileSetting::BLANK } else { gfx::FONT.tile_settings[glyph] };
+        bg.set_tile((9 + i as i32, 9), &amp;gfx::FONT.tiles, tile);
+    }
+
+    loop {
+        // every frame: describe what should be on screen, then commit it at the next vertical blank
+        let mut frame = gfx.frame();
+        bg.show(&amp;mut frame);
+        frame.commit();
+    }
+}</code></pre>
+<h4>What's going on</h4>
+<ul>
+<li><code>#![no_std]</code> and <code>#![no_main]</code>: there's no operating system, so no standard library and
+no normal <code>main</code>. <code>#[agb::entry]</code> marks the function the console jumps to after agb has set
+up memory and interrupts. It never returns (<code>-&gt; !</code>): a game runs until the power goes off.</li>
+<li><code>include_background_gfx!</code> runs <b>at compile time</b>. It reads the PNG, cuts it into 8&times;8 tiles,
+works out the palettes and embeds the result in the ROM. If the image breaks the GBA's rules, the build fails.</li>
+<li><code>set_tile</code> writes one entry of the background's map: "at column 9, row 9, show this tile".</li>
+<li>The loop is the heartbeat every agb program shares. <code>gfx.frame()</code> starts a description of the next
+picture; <code>bg.show(&amp;mut frame)</code> adds the layer to it; <code>frame.commit()</code> waits for VBlank and
+applies everything at once.</li>
+</ul>
+</section>
+
+<h2 id="lesson2">Lesson 2 · Display a sprite</h2>
+<section>
+<p>Sprites come from <code>include_aseprite!</code>, which reads Aseprite files or plain PNGs. Our ship sheet is a
+strip of 32&times;32 frames, and the <code>32x32</code> prefix tells the macro to split it.</p>
+<figure><img src="img/lesson2-sprite.png" alt="A blue ship on the left, and a red ship on the right caught mid-rotation" width="480">
+<figcaption>Left: a plain sprite. Right: the same kind of sprite rotated by the affine hardware.</figcaption></figure>
+<pre data-file="examples/02_sprite.rs"><code>//! Lesson 2: sprites. One plain sprite, and one rotated by the hardware's affine unit.
+//!
+//!     cargo build --release --example 02_sprite
+#![no_std]
+#![no_main]
+
+use agb::{
+    display::{
+        AffineMatrix,
+        object::{AffineMatrixObject, AffineMode, Object, ObjectAffine, include_aseprite},
+    },
+    fixnum::{Num, num},
+};
+
+// ships.png is a strip of 32x32 frames; `32x32` tells the macro to split it into frames.
+include_aseprite!(mod sprites, 32x32 "gfx/ships.png");
+
+#[agb::entry]
+fn main(mut gba: agb::Gba) -&gt; ! {
+    let mut gfx = gba.graphics.get();
+    let mut angle: Num&lt;i32, 8&gt; = num!(0); // in turns: 0.25 is a quarter turn
+
+    loop {
+        angle = (angle + num!(0.004)).rem_euclid(num!(1));
+
+        let mut frame = gfx.frame();
+
+        // A plain object: position is its top-left corner, in pixels.
+        let mut plain = Object::new(sprites::SHIPS.sprite(0));
+        plain.set_pos((60 - 16, 80 - 16));
+        plain.show(&amp;mut frame);
+
+        // An affine object: the matrix maps screen pixels back into the sprite, so a rotation by
+        // `angle` on screen uses the inverse rotation. AffineDouble doubles the drawing area to
+        // 64x64 so the corners aren't clipped while it turns, so the top-left moves by 32, not 16.
+        let matrix = AffineMatrixObject::new(AffineMatrix::from_rotation(-angle));
+        let mut spinning = ObjectAffine::new(sprites::SHIPS.sprite(3), matrix, AffineMode::AffineDouble);
+        spinning.set_pos((180 - 32, 80 - 32));
+        spinning.show(&amp;mut frame);
+
+        frame.commit();
+    }
+}</code></pre>
+<h4>What's going on</h4>
+<ul>
+<li><code>Object::new(sprite)</code> copies the sprite's tiles into video memory the first time it's used and shares
+them afterwards, so creating a fresh <code>Object</code> every frame is cheap. Objects are positioned by their
+<b>top-left corner</b>, which is why we subtract half the size.</li>
+<li>Angles in agb are in <b>turns</b>: 1.0 is a full circle, 0.25 a quarter. It's a natural unit for fixed-point
+maths, and 32 facings are simply multiples of 1/32.</li>
+<li>The affine matrix describes how to go from <i>screen</i> pixels back to <i>sprite</i> pixels, the inverse of
+what you'd expect. To turn a sprite by <code>angle</code> on screen, use <code>from_rotation(-angle)</code>.</li>
+<li><code>AffineMode::AffineDouble</code> lets the 32&times;32 sprite draw into a 64&times;64 area. Without it, the
+corners of a rotated ship are cut off. The position then refers to the corner of the bigger area.</li>
+</ul>
+</section>
+
+<h2 id="lesson3">Lesson 3 · Read input</h2>
+<section>
+<p>Input on the GBA is a register you read, not a stream of events. agb's <code>ButtonController</code> keeps this
+frame's and last frame's state, so it can answer both "is A held?" and "was A just pressed?".</p>
+<figure><img src="img/lesson3-input.png" alt="The blue ship moved up and to the right, turned" width="480">
+<figcaption>After holding Up+Right for a moment and pressing A.</figcaption></figure>
+<pre data-file="examples/03_input.rs"><code>//! Lesson 3: input. Fly a ship around with the D-pad; A and B turn it.
+//!
+//!     cargo build --release --example 03_input
+#![no_std]
+#![no_main]
+
+use agb::{
+    display::{
+        AffineMatrix,
+        object::{AffineMatrixObject, AffineMode, ObjectAffine, include_aseprite},
+    },
+    fixnum::{Num, Vector2D, num, vec2},
+    input::{Button, ButtonController},
+};
+
+include_aseprite!(mod sprites, 32x32 "gfx/ships.png");
+
+#[agb::entry]
+fn main(mut gba: agb::Gba) -&gt; ! {
+    let mut gfx = gba.graphics.get();
+    let mut input = ButtonController::new();
+    // fixed point: 24 bits of whole pixels and 8 of fraction, so sub-pixel speeds like 1.5 work
+    let mut pos: Vector2D&lt;Num&lt;i32, 8&gt;&gt; = vec2(num!(120.0), num!(80.0));
+    let mut angle: Num&lt;i32, 8&gt; = num!(0);
+
+    loop {
+        // read the buttons once per frame; everything else asks this snapshot
+        input.update();
+
+        // x_tri / y_tri are -1, 0 or +1 for the D-pad axes (y grows downwards on screen)
+        let step = vec2(Num::new(input.x_tri() as i32), Num::new(input.y_tri() as i32)) * num!(1.5);
+        pos += step;
+        if input.is_pressed(Button::A) { angle += num!(0.01); }
+        if input.is_pressed(Button::B) { angle -= num!(0.01); }
+        if input.is_just_pressed(Button::Start) { pos = vec2(num!(120.0), num!(80.0)); } // edge, not level
+
+        let mut frame = gfx.frame();
+        let matrix = AffineMatrixObject::new(AffineMatrix::from_rotation(-angle));
+        let mut ship = ObjectAffine::new(sprites::SHIPS.sprite(0), matrix, AffineMode::AffineDouble);
+        ship.set_pos((pos.x.floor() - 32, pos.y.floor() - 32));
+        ship.show(&amp;mut frame);
+        frame.commit();
+    }
+}</code></pre>
+<h4>What's going on</h4>
+<ul>
+<li><code>input.update()</code> once per frame takes a snapshot; everything after it reads the snapshot.</li>
+<li><code>x_tri()</code> and <code>y_tri()</code> turn the D-pad into −1, 0 or +1 per axis, which makes movement code
+short. On screen, y grows <b>downwards</b>.</li>
+<li><code>is_pressed</code> is true for as long as the button is held; <code>is_just_pressed</code> only on the frame
+it went down. Menus use the second, or one press would scroll through every item.</li>
+<li>The position is <code>Num&lt;i32, 8&gt;</code>, a fixed-point number, so the ship can move 1.5 pixels a frame.
+See the <a href="#fixed">interlude</a>.</li>
+</ul>
+</section>
+
+<h2 id="lesson4">Lesson 4 · Make a sound</h2>
+<section>
+<p>agb's mixer plays up to 8 samples at once. The trick we'll use for music is in this lesson: play one recorded
+note faster or slower and you get any other note. Twelve steps of 2<sup>1/12</sup> make an octave.</p>
+<pre data-file="examples/04_audio.rs"><code>//! Lesson 4: audio. A plays a note; Up/Down move it through a scale. One sample, any pitch.
+//!
+//!     cargo build --release --example 04_audio
+#![no_std]
+#![no_main]
+
+use agb::{
+    fixnum::Num,
+    include_wav,
+    input::{Button, ButtonController},
+    sound::mixer::{Frequency, SoundChannel, SoundData},
+};
+
+// The wav must be recorded at the mixer's rate (18157 Hz here) or it plays at the wrong speed.
+static PLUCK: SoundData = include_wav!("sfx/pluck.wav"); // an A (440 Hz)
+
+/// playback speed for `semitones` above the sample's pitch, as 8-bit fixed point (256 = 1x)
+fn speed(semitones: i32) -&gt; Num&lt;u32, 8&gt; {
+    const SEMI: [u32; 12] = [256, 271, 287, 304, 323, 342, 362, 384, 406, 431, 456, 483];
+    let (octave, step) = (semitones.div_euclid(12), SEMI[semitones.rem_euclid(12) as usize]);
+    let raw = if octave &gt;= 0 { step &lt;&lt; octave } else { step &gt;&gt; -octave };
+    // agb 0.25's mixer panics at exactly 1.5x speed; nudge that one value (see the guide)
+    Num::from_raw(if raw == 384 { 383 } else { raw })
+}
+
+#[agb::entry]
+fn main(mut gba: agb::Gba) -&gt; ! {
+    let mut gfx = gba.graphics.get();
+    let mut input = ButtonController::new();
+    let mut mixer = gba.mixer.mixer(Frequency::Hz18157);
+
+    const SCALE: [i32; 8] = [0, 2, 3, 5, 7, 8, 10, 12]; // A minor, in semitones above A
+    let mut degree = 0usize;
+
+    loop {
+        input.update();
+        if input.is_just_pressed(Button::Up) &amp;&amp; degree &lt; SCALE.len() - 1 { degree += 1; }
+        if input.is_just_pressed(Button::Down) &amp;&amp; degree &gt; 0 { degree -= 1; }
+        if input.is_just_pressed(Button::A) {
+            let mut note = SoundChannel::new(PLUCK);
+            note.playback(speed(SCALE[degree])).volume(Num::from_raw(200));
+            let _ = mixer.play_sound(note); // None if all 8 channels are busy: the note is dropped
+        }
+
+        let frame = gfx.frame();
+        // the mixer must be fed every frame or the audio stutters
+        mixer.frame();
+        frame.commit();
+    }
+}</code></pre>
+<h4>What's going on</h4>
+<ul>
+<li>The mixer runs at a fixed rate (here 18,157&nbsp;Hz), and every WAV must be recorded at exactly that rate.
+<code>include_wav!</code> checks it at compile time.</li>
+<li><code>mixer.frame()</code> must run every frame. It mixes the next slice of audio into a buffer that the
+hardware plays during the following frame. Skip it and the sound stutters.</li>
+<li><code>playback(speed)</code> resamples the note: 2.0 is an octave up, 0.5 an octave down. The table holds the
+twelve semitone ratios in 8-bit fixed point (256 = 1.0).</li>
+<li><code>play_sound</code> returns <code>None</code> when all 8 channels are busy. A normal-priority sound is then
+simply dropped, which is usually what you want for effects.</li>
+<li>The odd line about <code>384</code> works around a crash in agb 0.25's mixer at exactly 1.5&times; speed. It's
+the story of a real bug, told in <a href="#m8">M8</a>.</li>
+</ul>
+</section>
+
+<h2 id="fixed">Interlude: numbers without floats</h2>
+<section>
+<p>The GBA has no floating-point hardware. Floats still compile, but every operation becomes a slow software
+routine. Games use <b>fixed-point</b> numbers instead: an ordinary integer where the lowest bits are agreed to be the
+fraction.</p>
+<p>agb's <code>Num&lt;i32, 8&gt;</code> is a 32-bit integer with 8 fractional bits. The number 1.5 is stored as
+1.5&nbsp;&times;&nbsp;256&nbsp;=&nbsp;384. Adding two of them is a plain integer add; multiplying is an integer
+multiply and a shift. Precision is 1/256 of a pixel, which is plenty, and the range is about ±8 million.</p>
+<pre><code>type N = Num&lt;i32, 8&gt;;            // the game's number type
+type V = Vector2D&lt;N&gt;;             // a 2D position or velocity
+
+let speed: N = num!(1.75);        // num! converts a literal at compile time
+let pos = pos + dir(angle) * speed;
+let whole: i32 = pos.x.floor();   // back to whole pixels for drawing</code></pre>
+<p><code>Num</code> also provides <code>sin()</code> and <code>cos()</code>, taking angles in turns, and
+<code>sqrt()</code>. The rest of this guide uses <code>N</code> and <code>V</code> everywhere.</p>
+</section>
+
+<!-- ============================== PART 4 ============================== -->
+<div class="kicker" id="m1">Part 4 · Building Star Picket</div>
+<h2><span class="milestone">M1</span>Project and art pipeline</h2>
+<section>
+<p>With the basics in hand, the game starts the same way as the lessons: the three config files from
+<a href="#setup">setup</a> and a <code>main.rs</code> with an <code>#[agb::entry]</code> loop. The interesting part of
+this milestone is getting art onto the console.</p>
+<h3>From an asset pack to GBA sprites</h3>
+<p>The sprites come from the <a href="https://mattwalkden.itch.io/lunar-battle-pack">Lunar Battle Pack</a> by Matt
+Walkden, released as CC0 (public domain). The pack's sheets are laid out for a PC game: 64&times;64 cells, ships of
+many sizes, a star tile with an opaque navy background. The GBA wants something different, so a Python script
+reshapes them:</p>
+<div class="diagram" role="img" aria-label="Art pipeline: assets/lunar PNGs to tools/make_gfx.py to gfx PNGs, converted at compile time by agb macros into the ROM, copied to VRAM at runtime">
+<svg viewBox="0 0 860 150" xmlns="http://www.w3.org/2000/svg">
+  <rect x="10" y="10" width="840" height="130" rx="10" fill="#0d1328" stroke="#24304f"/>
+  <g font-size="13">
+    <rect x="30" y="45" width="150" height="56" rx="8" fill="#24304f"/><text x="105" y="69" text-anchor="middle" fill="#e8e5f7">assets/lunar/</text><text x="105" y="88" text-anchor="middle" fill="#9a95c4" font-size="11">the pack, as downloaded</text>
+    <rect x="220" y="45" width="160" height="56" rx="8" fill="#3a2a5a"/><text x="300" y="69" text-anchor="middle" fill="#e8e5f7">tools/make_gfx.py</text><text x="300" y="88" text-anchor="middle" fill="#9a95c4" font-size="11">crop, recolour, draw</text>
+    <rect x="420" y="45" width="130" height="56" rx="8" fill="#24304f"/><text x="485" y="69" text-anchor="middle" fill="#e8e5f7">gfx/*.png</text><text x="485" y="88" text-anchor="middle" fill="#9a95c4" font-size="11">GBA-sized sheets</text>
+    <rect x="590" y="45" width="110" height="56" rx="8" fill="#a8722a"/><text x="645" y="69" text-anchor="middle" fill="#0a0f1e" font-weight="700">ROM</text><text x="645" y="88" text-anchor="middle" fill="#0a0f1e" font-size="11">tiles + palettes</text>
+    <rect x="740" y="45" width="90" height="56" rx="8" fill="#2a5a4a"/><text x="785" y="69" text-anchor="middle" fill="#e8e5f7">VRAM</text><text x="785" y="88" text-anchor="middle" fill="#9a95c4" font-size="11">when shown</text>
+    <g stroke="#ffc861" stroke-width="2" fill="none"><path d="M180 73h34"/><path d="M380 73h34"/><path d="M550 73h34"/><path d="M700 73h34"/></g>
+    <text x="567" y="38" text-anchor="middle" fill="#ffc861" font-size="11">compile time</text>
+    <text x="720" y="122" text-anchor="middle" fill="#ffc861" font-size="11">run time</text>
+    <text x="300" y="122" text-anchor="middle" fill="#9a95c4" font-size="11">run by hand when art changes</text>
+  </g>
+</svg>
+</div>
+<p>What <code>tools/make_gfx.py</code> does:</p>
+<ul>
+<li><b>Re-cuts the ships into 32&times;32 frames</b>, centred, in one strip: the player, three enemy types, their
+three squadron leaders and the spy ship. GBA sprites must be one of twelve fixed sizes, and 32&times;32 fits every
+ship.</li>
+<li><b>Recolours</b> a small green ship yellow for the spy, as in the web version.</li>
+<li><b>Keys out</b> the star tiles' opaque navy so stars can be scattered over a transparent layer.</li>
+<li><b>Brightens the asteroids</b>, which were drawn for a lit moon surface and vanished against deep space.</li>
+<li><b>Draws what the pack doesn't have</b>: the space-station hulls and cores, the 5&times;7 pixel font, and the
+title logo.</li>
+<li><b>Counts colours</b> in every sheet, because a 16-colour sprite may only use 15 plus transparency.</li>
+</ul>
+<p>The game then imports the sheets in one place. Importing them together lets agb pack all their palettes into the
+16 available:</p>
+<pre data-file="src/main.rs"><code>include_aseprite!(
+    mod sprites,
+    32x32 "gfx/ships.png",       // split into 32x32 frames: SHIPS.sprite(0) is the player
+    32x32 "gfx/explosion.png",
+    "gfx/bolt.png",
+    "gfx/missile.png",
+    64x64 "gfx/hulls.png",
+    "gfx/pod.png",
+    16x16 "gfx/cores.png",
+    "gfx/rock_big.png",
+    "gfx/rock_small.png",
+    8x8 "gfx/digits.png",
+);
+include_background_gfx!(
+    mod backdrop,
+    "001020",                                  // the colour behind everything
+    FAR =&gt; deduplicate "gfx/stars_far.png",    // deduplicate: identical tiles stored once
+    NEAR =&gt; deduplicate "gfx/stars_near.png",
+    FONT =&gt; "gfx/font.png",
+    LOGO =&gt; "gfx/logo.png",
+);</code></pre>
+<div class="note"><b>Generated files are committed</b>The scripts are deterministic (fixed random seeds), and their
+output in <code>gfx/</code> and <code>sfx/</code> is committed. You only need Python if you change the art.</div>
+</section>
+
+<h2 id="m2"><span class="milestone">M2</span>A world that wraps</h2>
+<section>
+<p>Star Picket is played in a square sector that wraps around: fly off the right edge and you come back on the left.
+On the GBA the sector is 2048&times;2048 pixels, about 8.5 screens across.</p>
+<p>Wrapping positions is easy: keep every coordinate in 0..2048. The subtle part is <b>distance</b>. Two ships at
+x&nbsp;=&nbsp;10 and x&nbsp;=&nbsp;2040 are 30 pixels apart, not 2030. Every "how far" and "which way" question in
+the game goes through one function that picks the short way round:</p>
+<pre data-file="src/main.rs"><code>const WS: i32 = 2048; // the sector wraps at this size
+
+fn wrap(v: N) -&gt; N { v.rem_euclid(N::new(WS)) }
+/// shortest signed difference across the wrapping sector
+fn wd(d: N) -&gt; N { (d + N::new(WS / 2)).rem_euclid(N::new(WS)) - N::new(WS / 2) }
+fn wdv(a: V, b: V) -&gt; V { vec2(wd(a.x - b.x), wd(a.y - b.y)) }
+fn dist2(a: V, b: V) -&gt; i32 { let d = wdv(a, b); let (x, y) = (d.x.floor(), d.y.floor()); x * x + y * y }
+fn near(a: V, b: V, r: i32) -&gt; bool { dist2(a, b) &lt; r * r }</code></pre>
+<p><code>near</code> compares squared distances, so there's no square root in collision checks, which run hundreds of
+times a frame.</p>
+<h3>The camera</h3>
+<p>The camera follows the ship with a little lead in the direction it's flying, easing towards it each frame so the
+view feels smooth rather than locked on. Converting a world position to the screen is then one subtraction, done
+through <code>wdv</code> so objects near the seam still appear in the right place:</p>
+<pre data-file="src/main.rs"><code>// camera leads the ship a little
+let lead = if self.p.alive { dir(self.p.a) * 38 } else { zero() };
+let d = wdv(wrapv(self.p.pos + lead), self.cam);
+self.cam = wrapv(self.cam + d / 12);   // close 1/12 of the gap per frame
+
+fn to_screen(&amp;self, pos: V) -&gt; (i32, i32) {
+    let d = wdv(pos, self.cam);
+    (d.x.floor() + SW / 2, d.y.floor() + SH / 2)
+}</code></pre>
+<h3>Angles</h3>
+<p>Angles are in turns (0 = right, 0.25 = down). Steering needs "which way is that ship from me". The usual answer
+is <code>atan2</code>, but it isn't available in fixed point, so <code>ang_to</code> approximates it: it finds which
+eighth of the circle the target is in, then interpolates inside it. It's off by up to a few degrees, which nobody can
+see in a dogfight, and costs one division.</p>
+</section>
+
+<h2 id="m3"><span class="milestone">M3</span>Flying and shooting</h2>
+<section>
+<figure><img src="img/flight.png" alt="The player ship flying down through the starfield, firing a bolt forwards and backwards; score and radar in the corners" width="480">
+<figcaption>Flight: the guns fire fore and aft on their own.</figcaption></figure>
+<p>The web version steers with a touch joystick. On the GBA the D-pad picks a heading: the ship turns towards the
+direction you hold and speeds up, and cruises straight ahead when you let go. Guns fire automatically, one bolt
+forwards and one backwards, every 8 frames.</p>
+<pre data-file="src/main.rs"><code>let (ix, iy) = (input.x_tri() as i32, input.y_tri() as i32);
+if self.p.alive {
+    let steering = ix != 0 || iy != 0;
+    if steering {
+        // the D-pad direction as an angle, e.g. Up+Right is 0.875 turns
+        let target = ang_to(zero(), vec2(N::new(ix * 100), N::new(iy * 100)));
+        self.p.a = turn_toward(self.p.a, target, num!(0.02)); // at most 0.02 turns per frame
+    }
+    let target_v = if steering { num!(2.9) } else { num!(1.75) };
+    self.p.v += (target_v - self.p.v) / 15;                  // ease the speed
+    self.p.pos = wrapv(self.p.pos + dir(self.p.a) * self.p.v);
+    self.fire_t -= 1;
+    if self.fire_t &lt;= 0 {
+        self.fire_t = 8;
+        let d = dir(self.p.a);
+        let f = facing(self.p.a);
+        self.bullets.push(Bullet { pos: self.p.pos + d * 9, vel: d * (num!(7.0) + self.p.v), life: 30, f });
+        self.bullets.push(Bullet { pos: self.p.pos - d * 7, vel: -d * (num!(7.0) - self.p.v / 2), life: 24,
+                                   f: (f + FACINGS / 2) % FACINGS });
+    }
+}</code></pre>
+<h3>32 facings, 32 matrices</h3>
+<p>The hardware has 32 rotation matrices for all sprites together. Instead of giving each ship its own matrix (we'd
+run out at 32 ships), the game snaps every angle to one of 32 directions and builds one matrix per direction at
+startup. Any number of ships, bullets and missiles can then share them. The web version's pixel style snaps to 32
+facings too, so the two versions look alike.</p>
+<pre data-file="src/main.rs"><code>const FACINGS: usize = 32;
+fn facing(a: N) -&gt; usize { ((a * FACINGS as i32).round() as usize) % FACINGS }
+
+// at startup: one rotation matrix per facing, shared by every rotated sprite
+let matrices: Vec&lt;AffineMatrixObject&gt; = (0..FACINGS)
+    .map(|k| AffineMatrixObject::new(AffineMatrix::from_rotation(-N::new(k as i32) / FACINGS as i32)))
+    .collect();
+
+// drawing the player: a 32x32 sprite in a 64x64 double-size box
+let mut o = ObjectAffine::new(sprites::SHIPS.sprite(0), matrices[facing(g.p.a)].clone(), AffineMode::AffineDouble);
+o.set_pos((s.0 - 32, s.1 - 32));</code></pre>
+<div class="why"><b>Why it works</b><code>AffineMatrixObject</code> is reference-counted: cloning it is cheap, and
+agb uploads each distinct matrix to OAM once per frame. 32 facings is exactly the hardware's budget.</div>
+</section>
+
+<h2 id="m4"><span class="milestone">M4</span>The starfield</h2>
+<section>
+<p>The background is two tile layers of 256&times;256 pixels, made by scattering the pack's star and debris tiles.
+Background layers wrap at their edges in hardware, so a 256-pixel image repeats seamlessly forever. Scrolling the
+two layers at different fractions of the camera position gives parallax depth for free:</p>
+<pre data-file="src/main.rs"><code>let mut far = RegularBackground::new(Priority::P3, RegularBackgroundSize::Background32x32, TileFormat::FourBpp);
+far.fill_with(&amp;backdrop::FAR);
+let mut near_bg = RegularBackground::new(Priority::P2, RegularBackgroundSize::Background32x32, TileFormat::FourBpp);
+near_bg.fill_with(&amp;backdrop::NEAR);
+
+// every frame: both layers move slower than the world, the far one slowest
+far.set_scroll_pos((cam.x.floor() / 6, cam.y.floor() / 6));
+near_bg.set_scroll_pos((cam.x.floor() / 2, cam.y.floor() / 2));
+far.show(&amp;mut frame);
+near_bg.show(&amp;mut frame);</code></pre>
+<p>Priorities put the far stars at the back (3), the near stars in front of them (2), game sprites at 1, and the
+text layer and HUD at 0. Scrolling costs nothing: it's two register writes.</p>
+</section>
+
+<h2 id="m5"><span class="milestone">M5</span>Stations and collisions</h2>
+<section>
+<figure><img src="img/station-missile.png" alt="A hexagonal station with five turret pods and an amber core, launching a homing missile at the ship" width="480">
+<figcaption>A hex station launches a homing missile; one pod is already shot off.</figcaption></figure>
+<p>Stations are the goal of each round: destroy every one to clear the sector. A station is built from several
+sprites: a hull, a core in the middle, and a cannon pod on each corner. Shooting a pod twice destroys it (200
+points); destroying every pod, or hitting the core enough times, destroys the station (1500).</p>
+<p>The first version had one hexagonal design; <a href="#m13">M13</a> extends it to five. Each station records its
+pods' health and, since M13, their positions:</p>
+<pre data-file="src/main.rs"><code>struct Station {
+    pos: V, design: usize, facing: usize, n: usize, offs: [V; 8], pods: [i8; 8], pod_flash: [u8; 8],
+    core: i8, core_flash: u8, alive: bool, fire_t: i32, alerted: i32,
+}</code></pre>
+<h3>Bullets and what they hit</h3>
+<p>Every bullet, every frame, asks "did I hit anything?". The check runs in order of importance and stops at the
+first hit, with a cheap bounding-circle test before the detailed one:</p>
+<pre data-file="src/main.rs"><code>fn bullet_hits(&amp;mut self, at: V) -&gt; bool {
+    for i in 0..self.stations.len() {
+        let s = &amp;mut self.stations[i];
+        if !s.alive || !near(s.pos, at, s.reach()) { continue; }   // quick reject
+        for k in 0..s.n {
+            if s.pods[k] &gt; 0 &amp;&amp; near(s.pos + s.offs[k], at, 8) {
+                s.pods[k] -= 1; s.pod_flash[k] = 5; s.alerted = 360;
+                // ... a destroyed pod: explosion, +200, and maybe the whole station
+                return true;
+            }
+        }
+        // ... the core
+    }
+    // ... then the spy ship, fighters, missiles, asteroids
+    false
+}</code></pre>
+<h3>Drawing order and the sprite budget</h3>
+<p>Sprites shown earlier in a frame draw on top of later ones with the same priority. The renderer shows the HUD
+first, then explosions, ships, missiles, stations and asteroids, and it counts: OAM holds 128 sprites, so it stops at
+124 rather than fail. In a busy Condition Red fight the last things dropped are asteroids at the edge of the
+screen.</p>
+<pre data-file="src/main.rs"><code>let mut budget = 124usize; // OAM holds 128 objects
+macro_rules! show {
+    ($obj:expr) =&gt; { if budget &gt; 0 { budget -= 1; $obj.show(frame); } };
+}
+macro_rules! world {   // game objects sit behind the text layer
+    ($obj:expr) =&gt; { $obj.set_priority(Priority::P1); show!($obj); };
+}</code></pre>
+</section>
+
+<h2 id="m6"><span class="milestone">M6</span>Missiles, asteroids and lives</h2>
+<section>
+<p>When you fly within range of a station, its nearest pod launches a <b>homing missile</b>: it turns towards you a
+little each frame (slower than you can turn) and expires after about 4.5 seconds. Missiles can be shot down for 10
+points.</p>
+<pre data-file="src/main.rs"><code>for m in self.miss.iter_mut() {
+    if alive { m.a = turn_toward(m.a, ang_to(m.pos, pp), num!(0.0035)); }
+    m.pos = wrapv(m.pos + dir(m.a) * num!(2.15));
+    m.life -= 1;
+    if vulnerable &amp;&amp; near(m.pos, pp, 7) { m.life = 0; hit_player = true; }
+}</code></pre>
+<p><b>Asteroids</b> drift slowly and kill you on contact; shooting one gives 10 points. <b>Explosions</b> are an
+8-frame sprite animation, each frame shown for 4 game frames. A <code>Boom</code> can start with a negative timer, so
+a station's pods explode one after another instead of all at once.</p>
+<p>When you die, the ship is gone for 150 frames (2.5 seconds), then respawns with 150 frames of invulnerability,
+blinking, after clearing missiles and fighters that were waiting on top of it. With no lives left the game sets
+<code>over</code>, and the screen code takes over (<a href="#m9">M9</a>).</p>
+</section>
+
+<h2 id="m7"><span class="milestone">M7</span>HUD and radar</h2>
+<section>
+<p>The score is seven 8&times;8 digit sprites; lives are small amber arrows. The radar is more interesting: it's a
+32&times;32 sprite that the game <b>draws pixel by pixel</b> every four frames, using agb's
+<code>DynamicSprite16</code>. It shows the whole sector, centred on you:</p>
+<pre data-file="src/main.rs"><code>fn draw_radar(g: &amp;Game, palette: &amp;PaletteVramSingle) -&gt; SpriteVram {
+    let mut s = DynamicSprite16::new(Size::S32x32);
+    s.clear(1);                                   // palette index 1: the dark field
+    // ... a border in index 2
+    let plot = |s: &amp;mut DynamicSprite16, pos: V, c: u8, big: bool| {
+        let d = wdv(pos, g.p.pos);                // relative to you, across the wrap
+        let (x, y) = (16 + d.x.floor() * 30 / WS, 16 + d.y.floor() * 30 / WS);
+        // ... set one pixel, or a 2x2 block for important things
+    };
+    for st in g.stations.iter().filter(|s| s.alive) { plot(&amp;mut s, st.pos, 3, true); }
+    // ... missiles, fighters by type colour, the spy (blinking), and you in white
+    s.to_vram(palette.clone())                    // upload as a new sprite
+}</code></pre>
+<p>The radar has its own 16-colour palette, defined in code as <code>RADAR_PALETTE</code>: index 3 is a station's
+rose, 4 is your white, 6 an I-type fighter's pink, 10 the spy's yellow, and so on.</p>
+</section>
+
+<h2 id="m8"><span class="milestone">M8</span>Music your kills play</h2>
+<section>
+<p>Star Picket's signature is its soundtrack: a backing loop runs, and every kill adds a note that fits it, so a good
+run sounds like you're playing the melody. The web version builds this with live synthesizers. On the GBA it's built
+from a few short samples and the mixer.</p>
+<h3>Instruments from a script</h3>
+<p><code>tools/make_sfx.py</code> synthesizes every sound with plain Python maths and writes WAVs at the mixer's
+18,157&nbsp;Hz: a plucked note, a bell, a bass note, kick, hi-hat, clap, explosions, the death sound and the siren.
+Pitched instruments are recorded <b>at one note only</b> (the pluck and bell on A4, the bass on A2). The game plays
+them at other speeds to get every other note, as in <a href="#lesson4">lesson 4</a>.</p>
+<h3>A clock that counts 16th notes</h3>
+<p>The music runs at 124 beats per minute. At 60 frames a second that's 7.258 frames per 16th note, so the engine
+keeps a fixed-point counter, adds one each frame, and plays the next 16th whenever it passes 7.258:</p>
+<pre data-file="src/sound.rs"><code>const STEP_FRAMES: Num&lt;i32, 8&gt; = num!(7.258);   // frames per 16th note at 124 BPM
+
+pub fn frame(&amp;mut self) {
+    self.clock += 1;
+    while self.clock &gt;= STEP_FRAMES {
+        self.clock -= STEP_FRAMES;
+        let n = self.step;
+        self.play_step(n);   // booked notes and the backing band for 16th number n
+        self.step += 1;
+    }
+    self.mixer.frame();
+}</code></pre>
+<p>The chords change every two bars, cycling A minor, F, C and G. Each chord's three notes, spread over three octaves,
+make a 9-note "ladder":</p>
+<pre data-file="src/sound.rs"><code>const PROG: [[i32; 3]; 4] = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]];  // Am F C G, as MIDI notes
+fn chord(step: u32) -&gt; [i32; 3] { PROG[(step / 32) as usize % PROG.len()] }          // 32 16ths = 2 bars
+fn ladder(step: u32) -&gt; [i32; 9] {
+    let c = chord(step);
+    let mut l = [0; 9];
+    for o in 0..3 { for k in 0..3 { l[o * 3 + k] = c[k] + 12 * (o as i32 + 1); } }
+    l
+}</code></pre>
+<h3>Snapping kills to the beat</h3>
+<p>A kill doesn't play its note immediately. It <b>books</b> the next free 16th. Kills that land together (a mine
+chain, a squadron) queue up behind each other on consecutive 16ths, so a burst of kills comes out as a rapid
+arpeggio rather than a pile-up. An explosion "crunch" still plays instantly, so the hit feels immediate.</p>
+<div class="diagram" role="img" aria-label="Kills snap to the next free 16th note; three simultaneous kills spill into consecutive 16ths">
+<svg viewBox="0 0 860 170" xmlns="http://www.w3.org/2000/svg">
+  <rect x="10" y="10" width="840" height="150" rx="10" fill="#0d1328" stroke="#24304f"/>
+  <g stroke="#24304f">
+    <line x1="60" y1="100" x2="820" y2="100" stroke="#9a95c4"/>
+  </g>
+  <g fill="#9a95c4" font-size="11">
+    <text x="60" y="122">16th notes (one every 7.258 frames)</text>
+  </g>
+  <g>
+    <g stroke="#9a95c4"><line x1="100" y1="94" x2="100" y2="106"/><line x1="170" y1="94" x2="170" y2="106"/><line x1="240" y1="94" x2="240" y2="106"/><line x1="310" y1="94" x2="310" y2="106"/><line x1="380" y1="94" x2="380" y2="106"/><line x1="450" y1="94" x2="450" y2="106"/><line x1="520" y1="94" x2="520" y2="106"/><line x1="590" y1="94" x2="590" y2="106"/><line x1="660" y1="94" x2="660" y2="106"/><line x1="730" y1="94" x2="730" y2="106"/><line x1="800" y1="94" x2="800" y2="106"/></g>
+    <circle cx="198" cy="60" r="6" fill="#ff5d8f"/><text x="198" y="45" text-anchor="middle" fill="#ff5d8f" font-size="11">kill</text>
+    <path d="M198 66 L240 94" stroke="#ff5d8f" stroke-width="2" fill="none"/>
+    <circle cx="240" cy="100" r="7" fill="#ffc861"/>
+    <circle cx="470" cy="56" r="6" fill="#ff5d8f"/><circle cx="485" cy="56" r="6" fill="#ff5d8f"/><circle cx="500" cy="56" r="6" fill="#ff5d8f"/>
+    <text x="485" y="40" text-anchor="middle" fill="#ff5d8f" font-size="11">3 kills at once</text>
+    <path d="M478 62 L520 94 M488 62 L590 94 M498 62 L660 94" stroke="#ff5d8f" stroke-width="2" fill="none"/>
+    <circle cx="520" cy="100" r="7" fill="#ffc861"/><circle cx="590" cy="100" r="7" fill="#ffc861"/><circle cx="660" cy="100" r="7" fill="#ffc861"/>
+    <text x="590" y="145" text-anchor="middle" fill="#ffc861" font-size="12">an arpeggio up the chord</text>
+  </g>
+</svg>
+</div>
+<pre data-file="src/sound.rs"><code>/// the next free 16th; crowded kills queue behind each other, up to half a bar ahead
+fn book(&amp;mut self) -&gt; Option&lt;u32&gt; {
+    let n = self.step.max(self.slot + 1);
+    if n &gt; self.step + 8 { return None; }   // too crowded: skip the note (the crunch still played)
+    self.slot = n;
+    Some(n)
+}
+
+fn melody(&amp;mut self, step: u32) -&gt; (i32, [i32; 9]) {
+    let l = ladder(step);
+    if self.frame.wrapping_sub(self.last_kill) &gt; 96 {
+        self.pos = pick3() as i32; // more than 1.6 s since the last kill: a fresh run starts low
+        self.dir = 1;
+    } else {
+        self.pos += self.dir;      // a streak climbs the ladder, then comes back down
+        if self.pos &gt;= 8 || self.pos &lt;= 0 { self.dir = -self.dir; }
+    }
+    self.pos = self.pos.clamp(0, 8);
+    self.last_kill = self.frame;
+    (l[self.pos as usize], l)
+}</code></pre>
+<p>Different kills use the ladder differently: a fighter plays one pluck, a squadron leader a two-note chord, a cannon
+pod a bell an octave down, a whole squadron a run of six notes, and a station a kick, a low root note, the full chord
+and a run. The web version's echo effect is faked by booking the same note again three 16ths later at a third of the
+volume.</p>
+<h3>The backing band follows the alert condition</h3>
+<pre data-file="src/sound.rs"><code>// Green: sparse kick and bass. Yellow: claps, 8th hats and bass. Red: four on the floor, 16th hats.
+let lvl = if self.red { 2 } else if self.tense { 1 } else { 0 };
+let b = n % 16;                                     // position in the bar
+if b % 8 == 0 || (lvl == 2 &amp;&amp; b % 4 == 0) { self.now(KICK, UNPITCHED, 0, 200, false); }
+if lvl &gt;= 1 &amp;&amp; b % 8 == 4 { self.now(CLAP, UNPITCHED, 0, 90, false); }
+// ... hats and bass the same way</code></pre>
+
+<h3>Two crashes, and what they teach</h3>
+<p>The first build that went to a real player crashed after shooting an asteroid. The crash screen showed an
+assertion inside agb's mixer: <code>(total_to_play / 2 + 1) * 2 &lt;= temp_storage.len()</code>. Two separate bugs were
+involved:</p>
+<ol>
+<li><b>Exactly 1.5&times; speed crashes.</b> Each frame the mixer copies the part of a sample it's about to play into
+a small buffer: 457 bytes at our rate. At exactly 1.5&times; it needs 458. That speed is a perfect fifth above the
+sample's pitch, which for our A-pitched pluck is E5, and E is in two of the four chords. The fix plays that one speed
+as 1.496&times;, five cents flat, which nobody can hear:
+<pre data-file="src/sound.rs"><code>const SEMI: [u32; 12] = [256, 271, 287, 304, 323, 342, 362, 384, 406, 431, 456, 483]; // 2^(n/12), x256
+fn rate(m: i32, base: i32) -&gt; Num&lt;u32, 8&gt; {
+    let s = m - base;
+    let (oct, r) = (s.div_euclid(12), SEMI[s.rem_euclid(12) as usize]);
+    let raw = if oct &gt;= 0 { r &lt;&lt; oct } else { r &gt;&gt; (-oct) };
+    // agb 0.25's mixer panics at exactly 1.5x speed (its copy buffer check is one byte short there),
+    // which is a perfect fifth above the sample's pitch. 1.496x is 5 cents flat: inaudible, and safe.
+    Num::from_raw(if raw == 384 { 383 } else { raw })
+}</code></pre></li>
+<li><b>Too many important sounds crash too.</b> A "high priority" sound may replace a normal one when all 8
+channels are busy, but if all 8 are already high priority, agb panics instead of dropping it. Kill notes were all
+high priority, so a station kill with its chord, run and echoes could get there. The engine now tracks its live
+high-priority channels and caps them at 6 (7 for the death sound):
+<pre data-file="src/sound.rs"><code>fn now_with(&amp;mut self, data: SoundData, base: i32, m: i32, v: i16, high: bool, critical: bool) {
+    let mixer = &amp;mut self.mixer;
+    self.high.retain(|id| mixer.channel(id).is_some());       // forget channels that finished
+    let high = high &amp;&amp; self.high.len() &lt; if critical { 7 } else { 6 };
+    let mut ch = if high { SoundChannel::new_high_priority(data) } else { SoundChannel::new(data) };
+    if base != UNPITCHED { ch.playback(rate(m, base)); }
+    ch.volume(vol(v));
+    // a low-priority sound is just dropped when every channel is busy
+    if let Some(id) = self.mixer.play_sound(ch) &amp;&amp; high { self.high.push(id); }
+}</code></pre></li>
+</ol>
+<div class="why"><b>The lesson</b>The first test didn't catch either bug because ordinary play rarely hit that one
+note. The fix only counted once a test reproduced the crash: a <code>soundcheck</code> build that plays every
+instrument at every note the game can produce. Without the fix it crashes with the player's exact error; with it,
+every note passes. See <a href="#testing">testing</a>.</div>
+</section>
+
+<h2 id="m9"><span class="milestone">M9</span>Text, menus and screens</h2>
+<section>
+<div class="shots">
+<figure><img src="img/title.png" alt="Title screen"><figcaption>Title</figcaption></figure>
+<figure><img src="img/credits.png" alt="Credits screen"><figcaption>Credits</figcaption></figure>
+<figure><img src="img/game-over.png" alt="Game Over screen over the darkened playfield"><figcaption>Game Over, playfield darkened</figcaption></figure>
+</div>
+<h3>A text layer</h3>
+<p>All text lives on one background layer, the same technique as <a href="#lesson1">lesson 1</a>. A tile layer can
+hold as much text as fits on screen at no sprite cost, which matters on a console with 128 sprites. The font image has
+one row per colour (white, amber, dim, rose, green), so changing a word's colour just means using tiles from another
+row:</p>
+<pre data-file="src/ui.rs"><code>/// Must match GLYPHS in tools/make_gfx.py: the font image has one 8x8 cell per glyph, one row per ink.
+const GLYPHS: &amp;str = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:!?/&gt;&lt;#'()_+";
+
+pub fn put(&amp;mut self, x: i32, y: i32, s: &amp;str, ink: Ink) {
+    for (i, c) in s.chars().enumerate() {
+        let idx = GLYPHS.find(c.to_ascii_uppercase()).unwrap_or(0);
+        let tile = if idx == 0 { TileSetting::BLANK } else { self.font.tile_settings[ink as usize * GLYPHS.len() + idx] };
+        self.bg.set_tile((x + i as i32, y), &amp;self.font.tiles, tile);
+    }
+}</code></pre>
+<div class="note"><b>A bug worth knowing</b>The first bonus banners read "SQUADRON 500" instead of "+500". The font
+had no <code>+</code>, and unknown characters print as blanks by design. Silent fallbacks are convenient, but check
+your glyph list against your strings.</div>
+<h3>Screens as a state machine</h3>
+<p>Each screen is a variant of one enum. Every frame the main loop reads input for the current screen, may switch to
+another, and redraws the text when it does:</p>
+<div class="diagram" role="img" aria-label="Screen flow: Title to Play, Top Pilots or Credits; Play to Paused or Game Over; Game Over to callsign Entry or Top Pilots; Entry to Top Pilots; back to Title">
+<svg viewBox="0 0 860 220" xmlns="http://www.w3.org/2000/svg">
+  <rect x="10" y="10" width="840" height="200" rx="10" fill="#0d1328" stroke="#24304f"/>
+  <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#ffc861"/></marker></defs>
+  <g font-size="13" text-anchor="middle">
+    <rect x="40" y="90" width="110" height="40" rx="8" fill="#3a2a5a"/><text x="95" y="115" fill="#e8e5f7">Title</text>
+    <rect x="220" y="40" width="110" height="40" rx="8" fill="#24304f"/><text x="275" y="65" fill="#e8e5f7">Play</text>
+    <rect x="220" y="150" width="110" height="40" rx="8" fill="#24304f"/><text x="275" y="175" fill="#e8e5f7">Credits</text>
+    <rect x="400" y="40" width="110" height="40" rx="8" fill="#24304f"/><text x="455" y="65" fill="#e8e5f7">Paused</text>
+    <rect x="400" y="110" width="110" height="40" rx="8" fill="#24304f"/><text x="455" y="135" fill="#e8e5f7">Game Over</text>
+    <rect x="580" y="110" width="110" height="40" rx="8" fill="#24304f"/><text x="635" y="135" fill="#e8e5f7">Callsign</text>
+    <rect x="720" y="60" width="110" height="40" rx="8" fill="#a8722a"/><text x="775" y="85" fill="#0a0f1e" font-weight="700">Top Pilots</text>
+  </g>
+  <g stroke="#ffc861" stroke-width="1.6" fill="none" marker-end="url(#ar)">
+    <path d="M150 100 L218 64"/><path d="M150 120 L218 166"/>
+    <path d="M330 56 L398 56"/><path d="M398 70 L332 70"/>
+    <path d="M300 82 L405 112"/>
+    <path d="M510 130 L578 130"/><path d="M690 125 L735 102"/>
+    <path d="M510 118 L720 84"/>
+    <path d="M775 58 C775 20 95 20 95 88"/>
+    <path d="M220 175 C160 175 120 160 105 132"/>
+  </g>
+  <g font-size="11" fill="#9a95c4">
+    <text x="340" y="104">last ship lost</text><text x="590" y="102">top ten?</text><text x="365" y="34" text-anchor="middle">Start</text>
+  </g>
+</svg>
+</div>
+<pre data-file="src/main.rs"><code>enum Screen {
+    Title { sel: usize },
+    Board { highlight: Option&lt;usize&gt; },
+    Credits,
+    Play,
+    Paused { sel: usize },
+    GameOver { t: i32 },
+    Entry { name: [u8; 3], pos: usize },   // arcade-style callsign entry
+}</code></pre>
+<p>Back from Top Pilots, Credits or the pause menu's "Quit to title", you land on the title again.</p>
+<p>Static text (titles, labels) is drawn once when a screen opens; changing text (the blinking menu cursor, banners,
+the condition readout) is redrawn only when it changes, because writing tiles costs time.</p>
+<h3>Darkening the game behind a menu</h3>
+<p>Behind the pause menu and Game Over, the playfield is faded towards black by the display hardware, while the text
+layer stays bright. It's one line per frame:</p>
+<pre data-file="src/main.rs"><code>if matches!(screen, Screen::Paused { .. } | Screen::GameOver { .. }) {
+    frame.blend().darken(num!(0.5)).enable_background(far_id).enable_background(near_id).enable_object().enable_backdrop();
+}</code></pre>
+</section>
+
+<h2 id="m10"><span class="milestone">M10</span>Saving the leaderboard</h2>
+<section>
+<div class="shots">
+<figure><img src="img/callsign.png" alt="NEW RECORD: entering a three-letter callsign"><figcaption>Callsign entry</figcaption></figure>
+<figure><img src="img/top-pilots.png" alt="Top Pilots table with one entry highlighted"><figcaption>The saved top ten</figcaption></figure>
+</div>
+<p>The web version posts scores to a server. The GBA has no network, so the leaderboard is the top ten kept on the
+cartridge in <b>battery-backed SRAM</b>: 32&nbsp;KB that keeps its contents while the console is off. Calling
+<code>init_sram</code> also writes a marker into the ROM, which is how emulators and flash carts know to give the game
+a save file.</p>
+<pre data-file="src/scores.rs"><code>#[derive(Clone, Serialize, Deserialize)]
+pub struct Entry { pub name: [u8; 3], pub score: u32, pub round: u8 }
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct Board {
+    pub entries: Vec&lt;Entry&gt;,            // best first
+    pub last_name: Option&lt;[u8; 3]&gt;,     // offered again next time
+}
+
+/// Identifies our save data; anything else in SRAM is treated as blank and reformatted.
+const MAGIC: [u8; 32] = *b"STAR PICKET RETRO / TOP PILOTS 1";
+
+pub fn open(save: &amp;mut SaveManager) -&gt; Self {
+    Store { slots: save.init_sram(1, MAGIC).ok() }   // one save slot
+}
+pub fn load(&amp;mut self) -&gt; Board {
+    self.slots.as_mut().and_then(|s| s.read::&lt;Board&gt;(0).ok()).unwrap_or_default()
+}
+pub fn save(&amp;mut self, board: &amp;Board) -&gt; bool {
+    self.slots.as_mut().is_some_and(|s| s.write(0, board, &amp;()).is_ok())
+}</code></pre>
+<p>agb serialises the board with <code>serde</code> and writes it crash-safely: new data goes into fresh blocks
+before the old copy is retired, so pulling the power mid-save can't corrupt the table. If the save can't be opened at
+all, the game still runs; scores just aren't kept.</p>
+<p>When a game ends, <code>qualifies</code> checks whether the score beats the tenth entry. If it does, the callsign
+screen lets you pick three letters arcade-style: Up and Down change the letter, A moves on, B goes back. The new entry
+is inserted in order, the table trimmed to ten and saved.</p>
+</section>
+
+<h2 id="m11"><span class="milestone">M11</span>Fighters and squadrons</h2>
+<section>
+<div class="shots">
+<figure><img src="img/battle-stations.png" alt="BATTLE STATIONS: I-type squadron inbound, with a lone red fighter nearby"><figcaption>A squadron launches</figcaption></figure>
+<figure><img src="img/formation-broken.png" alt="FORMATION BROKEN after the leader was shot"><figcaption>The leader is down</figcaption></figure>
+</div>
+<p>Two kinds of enemy ship hunt you:</p>
+<ul>
+<li><b>Lone fighters</b> arrive from just off-screen every few seconds and fly at you.</li>
+<li><b>Squadrons</b>: five ships in a V, launched from the nearest base with a "BATTLE STATIONS" banner. There are
+three types with different flying styles, and the leader is a larger ship.</li>
+</ul>
+<pre data-file="src/main.rs"><code>// I weaves at you, P swings in from your flank like a boomerang, E is a dart that barely turns.
+Kind::I =&gt; KindStats { name: "I", sp: num!(1.7), turn: num!(0.004),  pts: 50, lead: 100, bonus: 500,  /* … */ },
+Kind::P =&gt; KindStats { name: "P", sp: num!(2.0), turn: num!(0.0064), pts: 60, lead: 120, bonus: 1000, /* … */ },
+Kind::E =&gt; KindStats { name: "E", sp: num!(3.4), turn: num!(0.0009), pts: 70, lead: 140, bonus: 1500, /* … */ },
+
+/// wingmen hold a V behind the leader, in the leader's frame (x forward, y to the side)
+const SLOTS: [(i32, i32); 4] = [(-16, -14), (-16, 14), (-33, -29), (-33, 29)];</code></pre>
+<h3>Three behaviours</h3>
+<p>Each fighter is in one of three modes. <b>Hunt</b>: steer by type. <b>Form</b>: a wingman flies to its slot in the
+V, rotated into the leader's direction, and copies the leader's heading. <b>Flee</b>: when the leader dies, the
+wingmen turn away from you and speed up by a third until they're out of range.</p>
+<pre data-file="src/main.rs"><code>Mode::Hunt =&gt; {
+    let target = match f.kind {
+        Kind::P =&gt; {
+            // boomerang: come in from the side, never straight down your gun line
+            let side = if ang_diff(pa, ang_to(pp, f.pos)) &gt;= num!(0) { num!(0.25) } else { num!(-0.25) };
+            let flank = wrapv(pp + dir(pa + side) * 82);
+            if near(f.pos, pp, 94) { ang_to(f.pos, pp) } else { ang_to(f.pos, flank) }
+        }
+        Kind::E =&gt; ang_to(f.pos, pp),                                  // a dart: aim and commit
+        Kind::I =&gt; ang_to(f.pos, pp) + f.wob.sin() * num!(0.0557),     // weave either side of you
+    };
+    f.a = turn_toward(f.a, target.rem_euclid(N::new(1)), st.turn);
+    f.pos = wrapv(f.pos + dir(f.a) * f.sp);
+}</code></pre>
+<p>Shooting the leader breaks the formation ("FORMATION BROKEN"); shooting all five pays the squadron
+bonus. Fighters that hit asteroids die without scoring, as in the web version.</p>
+<div class="why"><b>Tuning for a small screen</b>The first build copied the web version's speeds, and no enemy ever
+appeared. In the web version I-type fighters are slower than your ship, which is fine on a big screen where trailing
+enemies stay visible. On 240&times;160, they trailed out of view and never caught up. Logging their positions to the
+emulator showed them chasing faithfully, 470 pixels behind. The fix was to make I-types as fast as your cruise (you
+can still outrun them by holding a direction), make the other types about 15–20% faster, and spawn lone fighters
+just off-screen.</div>
+</section>
+
+<h2 id="m12"><span class="milestone">M12</span>Spy ship and alert conditions</h2>
+<section>
+<div class="shots">
+<figure><img src="img/spy-sighted.png" alt="SPY SHIP SIGHTED: shoot it before it reports"><figcaption>The spy appears (Condition Yellow)</figcaption></figure>
+<figure><img src="img/condition-red.png" alt="Condition Red: dark red background, a squadron launching"><figcaption>Condition Red</figcaption></figure>
+</div>
+<p>The <b>alert condition</b> is the game's tension dial, shown under the radar:</p>
+<table>
+<tr><th>Condition</th><th>When</th><th>Effect</th></tr>
+<tr><td style="color:var(--green)">Green</td><td>Nobody knows you're here</td><td>Sparse backing loop</td></tr>
+<tr><td style="color:var(--amber)">Yellow</td><td>A base has noticed you, ships are near, a squadron or the spy is out; and always after 30 s</td><td>Busier band</td></tr>
+<tr><td style="color:var(--rose)">Red</td><td>You linger (85 s, falling to 50 s in later rounds), or the spy escapes</td><td>Until the sector is cleared: up to 26 lone fighters, three squadrons at a time, faster ships, a siren, a throbbing red backdrop</td></tr>
+</table>
+<p>The clock can only raise the condition; within Yellow it rises and falls with what's around you:</p>
+<pre data-file="src/main.rs"><code>fn update_cond(&amp;mut self) {
+    self.round_t += 1;
+    let (yellow_at, red_at) = (1800, (5100 - self.round * 150).max(3000)); // 30 s; 85 s falling to 50 s
+    if self.round_t &gt; red_at &amp;&amp; self.cond &lt; RED { self.set_cond(RED, Why::TooLong); }
+    else if self.round_t &gt; yellow_at &amp;&amp; self.cond_min &lt; YELLOW { self.cond_min = YELLOW; self.set_cond(YELLOW, Why::Noticed); }
+    if self.cond == RED { return; }
+    // otherwise Yellow is situational: a base that has noticed you, ships near you, a squadron or the spy
+    let pp = self.p.pos;
+    let threat = self.cond_min == YELLOW
+        || self.stations.iter().any(|s| s.alive &amp;&amp; s.alerted &gt; 0)
+        || self.fighters.iter().any(|f| !f.dead &amp;&amp; near(f.pos, pp, 286))
+        || !self.squads.is_empty()
+        || self.spy.is_some();
+    self.cond = if threat { YELLOW } else { GREEN };
+}</code></pre>
+<h3>The spy ship</h3>
+<p>The spy circles you at a distance, glides away and swings back for another look. If it's far away for more than
+1.2 seconds, that counts as a "pass"; after three passes it escapes and reports your position, which sends the sector
+to Condition Red. Shooting it scores 200, then 400, then 800 for consecutive spies.</p>
+<h3>A red backdrop with one palette write</h3>
+<p>Condition Red tints everything behind the stars by changing <b>one colour</b>: colour 0 of background palette 0,
+which the hardware shows wherever no layer draws anything. A sine wave makes it throb:</p>
+<pre data-file="src/main.rs"><code>let throb = if matches!(screen, Screen::Play) &amp;&amp; g.cond == RED {
+    let pulse = (N::new((t % 64) as i32) / 64).sin() + num!(1); // 0..2 over 64 frames
+    (pulse * 36).floor() as u16 + 20
+} else { 0 };
+gfx.set_background_palette_colour(0, 0, rgb(throb, 16u16.saturating_sub(throb / 4), 32u16.saturating_sub(throb / 6)));</code></pre>
+</section>
+
+<h2 id="m13"><span class="milestone">M13</span>Five station designs</h2>
+<section>
+<figure><img src="img/station-designs.png" alt="The five station designs, each rotated: Hex, Lance and Trident on top, Diamond and Crown below" width="480">
+<figcaption>Top: Hex, Lance, Trident. Bottom: Diamond, Crown. Each is turned to a different one of the 32 facings.</figcaption></figure>
+<p>The last milestone gives stations variety, matching the web version's five designs. A design is a table: where
+the pods are (before rotation), how tough the core is, how fast it fires and how many missiles at once:</p>
+<pre data-file="src/main.rs"><code>struct Design { pods: &amp;'static [(i32, i32)], core: i8, core_frame: usize, fire_pct: i32, volley: usize }
+const DESIGNS: [Design; 5] = [
+    // the original six-pod hexagon
+    Design { pods: &amp;[(24, 0), (12, 21), (-12, 21), (-24, 0), (-12, -21), (12, -21)], core: 3, core_frame: 0, fire_pct: 100, volley: 1 },
+    // lance: a long hull, a cannon at each tip
+    Design { pods: &amp;[(-34, 0), (-17, -15), (17, -15), (34, 0), (17, 15), (-17, 15)], core: 3, core_frame: 0, fire_pct: 100, volley: 1 },
+    // trident: three arms, each ending in a fork of two pods
+    Design { pods: &amp;[(-10, -30), (10, -30), (31, 6), (21, 24), (-21, 24), (-31, 6)], core: 3, core_frame: 2, fire_pct: 100, volley: 1 },
+    // diamond: small, a fragile core, but it fires faster
+    Design { pods: &amp;[(30, 0), (0, -20), (-30, 0), (0, 20)], core: 2, core_frame: 4, fire_pct: 70, volley: 1 },
+    // crown: eight pods, a tougher core, and it fires missiles in pairs
+    Design { pods: &amp;[(30, 12), (12, 30), (-12, 30), (-30, 12), (-30, -12), (-12, -30), (12, -30), (30, -12)], core: 4, core_frame: 6, fire_pct: 115, volley: 2 },
+];</code></pre>
+<p>The same pod list lives in <code>tools/make_gfx.py</code>, which draws each hull as the polygon through its pods
+plus its own inner structure. Keeping the two in step is the one manual rule of this milestone.</p>
+<h3>Rotating a station made of many sprites</h3>
+<p>Each station picks a random facing. The hull and core are affine sprites using the same 32 shared matrices as the
+ships. The pods are plain sprites (round turrets look the same at any angle), so their <b>positions</b> are rotated
+instead, once, when the station is created:</p>
+<pre data-file="src/main.rs"><code>fn rotate(v: (i32, i32), a: N) -&gt; V { let d = dir(a); vec2(d.x * v.0 - d.y * v.1, d.y * v.0 + d.x * v.1) }
+
+fn new(pos: V, design: usize, facing: usize) -&gt; Self {
+    let d = &amp;DESIGNS[design];
+    let a = N::new(facing as i32) / FACINGS as i32;
+    let mut offs = [vec2(N::new(0), N::new(0)); 8];
+    let mut pods = [0; 8];
+    for (k, &amp;p) in d.pods.iter().enumerate() { offs[k] = rotate(p, a); pods[k] = 2; }
+    // ...
+}</code></pre>
+<p>Because collision checks, missile launches and drawing all read <code>offs</code>, rotation costs nothing after
+creation. Designs are dealt from a shuffled deck per sector, so a sector always mixes them; Trident joins in round 2
+and Crown in round 3.</p>
+</section>
+
+<!-- ============================== PART 5 ============================== -->
+<div class="kicker" id="testing">Part 5 · Shipping it</div>
+<h2>Testing and debugging</h2>
+<section>
+<p>There's no debugger attached to a GBA. Everything in this port was tested with an emulator, a log, and builds that
+set up the situation you want to look at.</p>
+<h3>Logging</h3>
+<p><code>agb::println!</code> writes to mGBA's log (Tools → View Logs, or <code>-l 255</code> on the command line).
+It's how the "invisible enemies" problem in <a href="#m11">M11</a> was found: a temporary line printing every
+fighter's position twice a second showed them chasing correctly, just too far away to see.</p>
+<h3>The crash screen</h3>
+<p>When a Rust program panics, agb shows the panic message, a QR code and a short code such as
+<code>9A4AIwAMu98cUBqHA6v1</code>. That code is an encoded stack trace. With the ELF file from the same build, agb's
+tool turns it back into function names and line numbers:</p>
+<pre><code>cargo install agb-debug
+agb-debug target/thumbv4t-none-eabi/release/star-picket-retro 9A4AIwAMu98cUBqHA6v1</code></pre>
+<p>This is why the release profile keeps <code>debug = true</code>: the symbols stay in the ELF, never in the
+<code>.gba</code> players get. It needs the ELF from <i>that exact build</i>, so keep it alongside any ROM you hand
+out.</p>
+<h3>Test builds</h3>
+<p>Cargo features switch on situations that are slow to reach by playing. None of them are in the normal build:</p>
+<table>
+<tr><th>Feature</th><th>What it does</th></tr>
+<tr><td><code>showcase</code></td><td>Parks a station right in front of you, launches a squadron within a second, sends the spy at 2 s and Condition Red at 15 s.</td></tr>
+<tr><td><code>quickover</code></td><td>One ship that explodes 3 seconds in, to test Game Over, callsign entry and saving.</td></tr>
+<tr><td><code>gallery</code></td><td>Freezes round 1 with one of each station design around you.</td></tr>
+<tr><td><code>soundcheck</code></td><td>Plays every pitched instrument at every note the game can produce, one note per frame, and logs the result.</td></tr>
+</table>
+<pre><code>cargo build --release --features showcase
+agb-gbafix target/thumbv4t-none-eabi/release/star-picket-retro -o showcase.gba</code></pre>
+<h3>Automated play</h3>
+<p>This port was developed on a headless Linux machine, so every screenshot in this guide was taken by a script:
+mGBA running in a virtual X display (<code>Xvfb</code>), key presses sent with <code>xdotool</code> (mGBA's default keys
+are the arrows, <kbd>X</kbd> for A, <kbd>Z</kbd> for B, <kbd>Enter</kbd> for Start), and screenshots with ImageMagick's
+<code>import</code>. The same setup ran a 60-second random-input stress test after each milestone, checking the log
+for panics.</p>
+<p>Sound was checked the same way: SDL's "disk" audio driver writes the emulator's output to a file, which a short
+Python script analyses for loudness and note timing. That's how we confirmed the kick drum lands exactly on the
+124&nbsp;BPM grid, which also proves the game holds 60 frames a second, since the music clock counts frames.</p>
+<pre><code>SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE=out.raw mgba -3 dist/star-picket.gba   # 16-bit stereo, 44.1 kHz</code></pre>
+<div class="warn"><b>Emulators are not the console</b>mGBA is very accurate, but always try a build on the platform
+your players use. The mixer crash in <a href="#m8">M8</a> was first seen on a phone emulator, because a real player
+reached a note the scripted tests never had.</div>
+</section>
+
+<h2 id="next">Where to go next</h2>
+<section>
+<p>The web version still has features the port doesn't:</p>
+<ul>
+<li><b>Mines</b> that explode in chains, taking nearby ships with them. Their chain reactions would feed the music
+system nicely: simultaneous kills already become arpeggios.</li>
+<li><b>Voice callouts</b> ("Condition red!", "Battle stations!"). They'd be short recorded samples played through the
+mixer, competing with the music for its 8 channels.</li>
+<li><b>Score pop-ups</b> where things explode. Text sprites would cost sprite budget, so they'd need a cap.</li>
+</ul>
+<p>Ideas that suit the GBA in particular: rumble-free "screen shake" by nudging the background scroll registers, a
+two-player link-cable mode, and moving the hottest maths (collision checks) to fast IWRAM.</p>
+</section>
+
+<h2 id="refs">References</h2>
+<section>
+<ul>
+<li><a href="https://problemkaputt.de/gbatek.htm">GBATEK</a>: the definitive GBA hardware reference: every
+register, timing and quirk.</li>
+<li><a href="https://gbadev.net/tonc/">Tonc</a>: the classic GBA programming tutorial (C), excellent for
+understanding what agb does for you.</li>
+<li><a href="https://agbrs.dev">agbrs.dev</a>: agb's book and interactive examples; <a href="https://docs.rs/agb">docs.rs/agb</a> for the API.</li>
+<li><a href="https://gbadev.net">gbadev.net</a>: the GBA homebrew community: tools, guides, forums.</li>
+<li><a href="https://mgba.io">mGBA</a>: the emulator used throughout.</li>
+<li><a href="https://mattwalkden.itch.io/lunar-battle-pack">Lunar Battle Pack</a> by Matt Walkden (CC0): the art.</li>
+<li><a href="https://star-picket.vercel.app">Star Picket</a>: the original web version.</li>
+</ul>
+<p style="color:var(--dim);margin-top:40px">Star Picket — a ConfusedGameDev game. Engineering: Jorge Pedrero. Art: Matt Walkden.</p>
+</section>
+</main>
+</div>
+</body>
+</html>

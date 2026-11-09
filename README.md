@@ -6,6 +6,9 @@ A Game Boy Advance port of [Star Picket](https://star-picket.vercel.app), the se
 **Play it:** load `dist/star-picket.gba` in any GBA emulator ([mGBA](https://mgba.io) recommended) or on real hardware
 with a flash cart.
 
+**Learn how it works:** open [`docs/index.html`](docs/index.html) in a browser for a step-by-step guide: the GBA's
+hardware, why this port uses agb, four starter lessons (in `examples/`), then the game built milestone by milestone.
+
 ## Controls
 
 | Button | Action |
@@ -62,6 +65,7 @@ agb-gbafix target/thumbv4t-none-eabi/release/star-picket-retro -o dist/star-pick
 ```
 
 `cargo run --release` builds and opens the game in `mgba-qt` if it's on your PATH.
+The four starter lessons build the same way, e.g. `cargo build --release --example 01_hello`.
 `cargo build --release --features showcase` parks a station right in front of the start position and launches a
 squadron within a second, for testing.
 `cargo build --release --features quickover` gives you one ship that explodes 3 seconds in, for testing the menus.
